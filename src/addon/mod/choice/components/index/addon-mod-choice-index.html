@@ -3,6 +3,7 @@
     <core-context-menu>
         <core-context-menu-item *ngIf="externalUrl" [priority]="900" [content]="'core.openinbrowser' | translate" [href]="externalUrl" [iconAction]="'open'"></core-context-menu-item>
         <core-context-menu-item *ngIf="description" [priority]="800" [content]="'core.moduleintro' | translate" (action)="expandDescription()" [iconAction]="'arrow-forward'"></core-context-menu-item>
+        <core-context-menu-item *ngIf="blog" [priority]="750" content="{{'addon.blog.blog' | translate}}" [iconAction]="'fa-newspaper-o'" (action)="gotoBlog($event)"></core-context-menu-item>
         <core-context-menu-item *ngIf="loaded && !hasOffline && isOnline" [priority]="700" [content]="'core.refresh' | translate" (action)="doRefresh(null, $event)" [iconAction]="refreshIcon" [closeOnClick]="false"></core-context-menu-item>
         <core-context-menu-item *ngIf="loaded && hasOffline && isOnline"  [priority]="600" [content]="'core.settings.synchronizenow' | translate" (action)="doRefresh(null, $event, true)" [iconAction]="syncIcon" [closeOnClick]="false"></core-context-menu-item>
         <core-context-menu-item *ngIf="prefetchStatusIcon" [priority]="500" [content]="prefetchText" (action)="prefetch()" [iconAction]="prefetchStatusIcon" [closeOnClick]="false"></core-context-menu-item>
@@ -62,7 +63,7 @@
 
     <!-- Choice results -->
     <div *ngIf="canSeeResults">
-        <ion-item-divider color="light" text-center>
+        <ion-item-divider text-center>
             {{ 'addon.mod_choice.responses' | translate }}
         </ion-item-divider>
         <ion-grid no-padding>
@@ -77,14 +78,12 @@
                 </ion-col>
                 <ion-col *ngIf="choice.publish && results" col-12 col-lg-7>
                     <ion-item-group *ngFor="let result of results">
-                        <ion-item-divider text-wrap color="light">
+                        <ion-item-divider text-wrap>
                             <h2><core-format-text [text]="result.text"></core-format-text></h2>
                             <p>{{ 'addon.mod_choice.numberofuser' | translate }}: {{ result.numberofuser }} ({{ 'core.percentagenumber' | translate: {$a: result.percentageamount} }})</p>
                         </ion-item-divider>
                         <a ion-item *ngFor="let user of result.userresponses" core-user-link [courseId]="courseid" [userId]="user.userid" [title]="user.fullname" text-wrap>
-                            <ion-avatar item-start>
-                                <img [src]="user.profileimageurl" [alt]="'core.pictureof' | translate:{$a: user.fullname}" core-external-content onError="this.src='assets/img/user-avatar.png'">
-                            </ion-avatar>
+                            <ion-avatar core-user-avatar [user]="user" item-start [courseId]="courseid"></ion-avatar>
                             <p>{{user.fullname}}</p>
                         </a>
                     </ion-item-group>

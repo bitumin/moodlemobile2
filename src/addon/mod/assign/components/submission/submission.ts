@@ -32,7 +32,6 @@ import { CoreUserProvider } from '@core/user/providers/user';
 import { AddonModAssignProvider } from '../../providers/assign';
 import { AddonModAssignHelperProvider } from '../../providers/helper';
 import { AddonModAssignOfflineProvider } from '../../providers/assign-offline';
-import * as moment from 'moment';
 import { CoreTabsComponent } from '@components/tabs/tabs';
 import { CoreSplitViewComponent } from '@components/split-view/split-view';
 import { AddonModAssignSubmissionPluginComponent } from '../submission-plugin/submission-plugin';
@@ -339,7 +338,8 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
 
         promises.push(this.assignProvider.invalidateAssignmentData(this.courseId));
         if (this.assign) {
-            promises.push(this.assignProvider.invalidateSubmissionStatusData(this.assign.id, this.submitId, !!this.blindId));
+            promises.push(this.assignProvider.invalidateSubmissionStatusData(this.assign.id, this.submitId, undefined,
+                !!this.blindId));
             promises.push(this.assignProvider.invalidateAssignmentUserMappingsData(this.assign.id));
             promises.push(this.assignProvider.invalidateListParticipantsData(this.assign.id));
         }
@@ -383,7 +383,7 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
             this.assign = assign;
 
             if (assign.allowsubmissionsfromdate && assign.allowsubmissionsfromdate >= time) {
-                this.fromDate = moment(assign.allowsubmissionsfromdate * 1000).format(this.translate.instant('core.dfmediumdate'));
+                this.fromDate = this.timeUtils.userDate(assign.allowsubmissionsfromdate * 1000);
             }
 
             this.currentAttempt = 0;
@@ -409,7 +409,7 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
             return Promise.all(promises);
         }).then(() => {
             // Get submission status.
-            return this.assignProvider.getSubmissionStatus(this.assign.id, this.submitId, isBlind);
+            return this.assignProvider.getSubmissionStatusWithRetry(this.assign, this.submitId, undefined, isBlind);
         }).then((response) => {
 
             const promises = [];
@@ -465,12 +465,14 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
         this.grade = {
             method: false,
             grade: false,
+            gradebookGrade: false,
             modified: 0,
             gradingStatus: false,
             addAttempt : false,
             applyToAll: false,
             scale: false,
-            lang: false
+            lang: false,
+            disabled: false
         };
 
         this.originalGrades =  {
@@ -484,12 +486,14 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
             this.feedback = feedback;
 
             // If we have data about the grader, get its profile.
-            if (feedback.grade && feedback.grade.grader) {
+            if (feedback.grade && feedback.grade.grader > 0) {
                 this.userProvider.getProfile(feedback.grade.grader, this.courseId).then((profile) => {
                     this.grader = profile;
                 }).catch(() => {
                     // Ignore errors.
                 });
+            } else {
+                delete this.grader;
             }
 
             // Check if the grade uses advanced grading.
@@ -503,7 +507,9 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
             // Do not override already loaded grade.
             if (feedback.grade && feedback.grade.grade && !this.grade.grade) {
                 const parsedGrade = parseFloat(feedback.grade.grade);
-                this.grade.grade = parsedGrade || parsedGrade == 0 ? parsedGrade : null;
+                this.grade.grade = parsedGrade >= 0 ? parsedGrade : null;
+                this.grade.gradebookGrade = this.utils.formatFloat(this.grade.grade);
+                this.originalGrades.grade = this.grade.grade;
             }
         } else {
             // If no feedback, always show Submission.
@@ -551,6 +557,18 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
                     this.assignProvider.getSubmissionGradingStatusTranslationId(this.grade.gradingStatus);
             }
 
+            if (this.isGrading && this.lastAttempt.gradingstatus == 'graded' && !this.assign.markingworkflow) {
+                if (this.feedback.gradeddate < this.lastAttempt.submission.timemodified) {
+                    this.lastAttempt.gradingstatus = AddonModAssignProvider.GRADED_FOLLOWUP_SUBMIT;
+
+                    // Get grading text and color.
+                    this.gradingStatusTranslationId = this.assignProvider.getSubmissionGradingStatusTranslationId(
+                            this.lastAttempt.gradingstatus);
+                    this.gradingColor = this.assignProvider.getSubmissionGradingStatusColor(this.lastAttempt.gradingstatus);
+
+                }
+            }
+
             if (!this.feedback || !this.feedback.plugins) {
                 // Feedback plugins not present, we have to use assign configs to detect the plugins used.
                 this.feedback = {};
@@ -569,7 +587,7 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
                     if (data && (!feedback || !feedback.gradeddate || feedback.gradeddate < data.timemodified)) {
                         // If grade has been modified from gradebook, do not use offline.
                         if (this.grade.modified < data.timemodified) {
-                            this.grade.grade = data.grade;
+                            this.grade.grade = !this.grade.scale ? this.utils.formatFloat(data.grade) : data.grade;
                             this.gradingStatusTranslationId = 'addon.mod_assign.gradenotsynced';
                             this.gradingColor = '';
                             this.originalGrades.grade = this.grade.grade;
@@ -717,7 +735,7 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
             const attemptNumber = this.userSubmission ? this.userSubmission.attemptnumber : -1,
                 outcomes = {},
                 // Scale "no grade" uses -1 instead of 0.
-                grade = this.grade.scale && this.grade.grade == 0 ? -1 : this.utils.unformatFloat(this.grade.grade);
+                grade = this.grade.scale && this.grade.grade == 0 ? -1 : this.utils.unformatFloat(this.grade.grade, true);
 
             if (grade === false) {
                 // Grade is invalid.
@@ -756,8 +774,6 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
                         userId: this.currentUserId
                     }, this.siteId);
                 });
-            }).catch((error) => {
-                this.domUtils.showErrorModalDefault(error, 'core.error', true);
             }).finally(() => {
                 // Select submission view.
                 this.tabs.selectTab(0);
@@ -786,6 +802,10 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
         if (this.gradeInfo.scale) {
             this.grade.scale = this.utils.makeMenuFromList(this.gradeInfo.scale, this.translate.instant('core.nograde'));
         } else {
+            // Format the grade.
+            this.grade.grade = this.utils.formatFloat(this.grade.grade);
+            this.originalGrades.grade = this.grade.grade;
+
             // Get current language to format grade input field.
             this.langProvider.getCurrentLanguage().then((lang) => {
                 this.grade.lang = lang;
@@ -813,14 +833,15 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
 
                     // Not using outcomes or scale, get the numeric grade.
                     if (this.grade.scale) {
-                        this.grade.grade = this.gradesHelper.getGradeValueFromLabel(this.grade.scale, grade.gradeformatted);
+                        this.grade.gradebookGrade = this.utils.formatFloat(this.gradesHelper.getGradeValueFromLabel(
+                                this.grade.scale, grade.gradeformatted));
                     } else {
                         const parsedGrade = parseFloat(grade.gradeformatted);
-                        this.grade.grade = parsedGrade || parsedGrade == 0 ? parsedGrade : null;
+                        this.grade.gradebookGrade = parsedGrade || parsedGrade == 0 ? this.utils.formatFloat(parsedGrade) : null;
                     }
 
+                    this.grade.disabled = grade.gradeislocked || grade.gradeisoverridden;
                     this.grade.modified = grade.gradedategraded;
-                    this.originalGrades.grade = this.grade.grade;
                 } else if (grade.outcomeid) {
 
                     // Only show outcomes with info on it, outcomeid could be null if outcomes are disabled on site.
@@ -836,6 +857,7 @@ export class AddonModAssignSubmissionComponent implements OnInit, OnDestroy {
                             outcomes.push(outcome);
                         }
                     });
+                    this.gradeInfo.disabled = grade.gradeislocked || grade.gradeisoverridden;
                 }
             });
 

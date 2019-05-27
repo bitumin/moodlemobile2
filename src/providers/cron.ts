@@ -19,7 +19,7 @@ import { CoreConfigProvider } from './config';
 import { CoreLoggerProvider } from './logger';
 import { CoreUtilsProvider } from './utils/utils';
 import { CoreConstants } from '@core/constants';
-import { SQLiteDB } from '@classes/sqlitedb';
+import { SQLiteDB, SQLiteDBTableSchema } from '@classes/sqlitedb';
 
 /**
  * Interface that all cron handlers must implement.
@@ -94,7 +94,7 @@ export class CoreCronDelegate {
 
     // Variables for database.
     protected CRON_TABLE = 'cron';
-    protected tableSchema = {
+    protected tableSchema: SQLiteDBTableSchema = {
         name: this.CRON_TABLE,
         columns: [
             {
@@ -162,7 +162,7 @@ export class CoreCronDelegate {
         if (isSync) {
             // Check network connection.
             promise = this.configProvider.get(CoreConstants.SETTINGS_SYNC_ONLY_ON_WIFI, false).then((syncOnlyOnWifi) => {
-                return !syncOnlyOnWifi || !this.appProvider.isNetworkAccessLimited();
+                return !syncOnlyOnWifi || this.appProvider.isWifi();
             });
         } else {
             promise = Promise.resolve(true);
@@ -236,21 +236,35 @@ export class CoreCronDelegate {
         const promises = [];
 
         for (const name in this.handlers) {
-            const handler = this.handlers[name];
             if (this.isHandlerManualSync(name)) {
-                // Mark the handler as running (it might be running already).
-                handler.running = true;
-
-                // Cancel pending timeout.
-                clearTimeout(handler.timeout);
-                delete handler.timeout;
-
                 // Now force the execution of the handler.
-                promises.push(this.checkAndExecuteHandler(name, true, siteId));
+                promises.push(this.forceCronHandlerExecution(name, siteId));
             }
         }
 
         return this.utils.allPromises(promises);
+    }
+
+    /**
+     * Force execution of a cron tasks without waiting for the scheduled time.
+     * Please notice that some tasks may not be executed depending on the network connection and sync settings.
+     *
+     * @param {string} [name]  If provided, the name of the handler.
+     * @param {string} [siteId] Site ID. If not defined, all sites.
+     * @return {Promise<any>} Promise resolved if handler has been executed successfully, rejected otherwise.
+     */
+    forceCronHandlerExecution(name?: string, siteId?: string): Promise<any> {
+        const handler = this.handlers[name];
+
+        // Mark the handler as running (it might be running already).
+        handler.running = true;
+
+        // Cancel pending timeout.
+        clearTimeout(handler.timeout);
+        delete handler.timeout;
+
+        // Now force the execution of the handler.
+        return this.checkAndExecuteHandler(name, true, siteId);
     }
 
     /**

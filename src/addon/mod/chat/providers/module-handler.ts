@@ -17,6 +17,8 @@ import { NavController, NavOptions } from 'ionic-angular';
 import { AddonModChatIndexComponent } from '../components/index/index';
 import { CoreCourseModuleHandler, CoreCourseModuleHandlerData } from '@core/course/providers/module-delegate';
 import { CoreCourseProvider } from '@core/course/providers/course';
+import { CoreConstants } from '@core/constants';
+import { AddonModChatProvider } from './chat';
 
 /**
  * Handler to support chat modules.
@@ -26,7 +28,18 @@ export class AddonModChatModuleHandler implements CoreCourseModuleHandler {
     name = 'AddonModChat';
     modName = 'chat';
 
-    constructor(private courseProvider: CoreCourseProvider) { }
+    supportedFeatures = {
+        [CoreConstants.FEATURE_GROUPS]: true,
+        [CoreConstants.FEATURE_GROUPINGS]: true,
+        [CoreConstants.FEATURE_MOD_INTRO]: true,
+        [CoreConstants.FEATURE_COMPLETION_TRACKS_VIEWS]: true,
+        [CoreConstants.FEATURE_GRADE_HAS_GRADE]: false,
+        [CoreConstants.FEATURE_GRADE_OUTCOMES]: true,
+        [CoreConstants.FEATURE_BACKUP_MOODLE2]: true,
+        [CoreConstants.FEATURE_SHOW_DESCRIPTION]: true
+    };
+
+    constructor(private courseProvider: CoreCourseProvider, private chatProvider: AddonModChatProvider) { }
 
     /**
      * Check if the handler is enabled on a site level.
@@ -46,14 +59,24 @@ export class AddonModChatModuleHandler implements CoreCourseModuleHandler {
      * @return {CoreCourseModuleHandlerData} Data to render the module.
      */
     getData(module: any, courseId: number, sectionId: number): CoreCourseModuleHandlerData {
-        return {
-            icon: this.courseProvider.getModuleIconSrc('chat'),
+        const data: CoreCourseModuleHandlerData = {
+            icon: this.courseProvider.getModuleIconSrc(this.modName, module.modicon),
             title: module.name,
             class: 'addon-mod_chat-handler',
-            action(event: Event, navCtrl: NavController, module: any, courseId: number, options: NavOptions): void {
-                navCtrl.push('AddonModChatIndexPage', {module: module, courseId: courseId}, options);
+            action(event: Event, navCtrl: NavController, module: any, courseId: number, options: NavOptions, params?: any): void {
+                const pageParams = {module: module, courseId: courseId};
+                if (params) {
+                    Object.assign(pageParams, params);
+                }
+                navCtrl.push('AddonModChatIndexPage', pageParams, options);
             }
         };
+
+        this.chatProvider.areSessionsAvailable().then((available) => {
+            data.showDownloadButton = available;
+        });
+
+        return data;
     }
 
     /**

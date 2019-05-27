@@ -57,7 +57,6 @@ export class AddonModDataEditPage {
     loaded = false;
     selectedGroup = 0;
     cssClass = '';
-    cssTemplate = '';
     groupInfo: any;
     editFormRender = '';
     editForm: FormGroup;
@@ -132,8 +131,6 @@ export class AddonModDataEditPage {
 
             return this.dataProvider.getDatabaseAccessInformation(data.id);
         }).then((accessData) => {
-            this.cssTemplate = this.dataHelper.prefixCSS(this.data.csstemplate, '.' + this.cssClass);
-
             if (this.entryId) {
                 return this.groupsProvider.getActivityGroupInfo(this.data.coursemodule, accessData.canmanageentries)
                         .then((groupInfo) => {
@@ -185,9 +182,13 @@ export class AddonModDataEditPage {
     /**
      * Saves data.
      *
+     * @param {Event} e Event.
      * @return {Promise<any>} Resolved when done.
      */
-    save(): Promise<any> {
+    save(e: Event): Promise<any> {
+        e.preventDefault();
+        e.stopPropagation();
+
         const inputData = this.editForm.value;
 
         return this.dataHelper.hasEditDataChanged(inputData, this.fieldsArray, this.data.id,
@@ -272,10 +273,7 @@ export class AddonModDataEditPage {
             });
         }).catch((error) => {
             this.domUtils.showErrorModalDefault(error, 'Cannot edit entry', true);
-
-            return Promise.reject(null);
         });
-
     }
 
     /**
@@ -297,13 +295,9 @@ export class AddonModDataEditPage {
      * @return {string}  Generated HTML.
      */
     protected displayEditFields(): string {
-        if (!this.data.addtemplate) {
-            return '';
-        }
-
         this.jsData = {
             fields: this.fields,
-            contents: this.entry.contents,
+            contents: this.utils.clone(this.entry.contents),
             form: this.editForm,
             data: this.data,
             errors: this.errors
@@ -311,7 +305,7 @@ export class AddonModDataEditPage {
 
         let replace,
             render,
-            template = this.data.addtemplate;
+            template = this.data.addtemplate || this.dataHelper.getDefaultTemplate('add', this.fieldsArray);
 
         // Replace the fields found on template.
         this.fieldsArray.forEach((field) => {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Injectable } from '@angular/core';
+import { Injectable, NgZone } from '@angular/core';
 import { NavController } from 'ionic-angular';
 import { TranslateService } from '@ngx-translate/core';
 import { CoreAppProvider } from '@providers/app';
@@ -40,11 +40,27 @@ export class CoreContentLinksHelperProvider {
             private contentLinksDelegate: CoreContentLinksDelegate, private appProvider: CoreAppProvider,
             private domUtils: CoreDomUtilsProvider, private urlUtils: CoreUrlUtilsProvider, private translate: TranslateService,
             private initDelegate: CoreInitDelegate, eventsProvider: CoreEventsProvider, private textUtils: CoreTextUtilsProvider,
-            private sitePluginsProvider: CoreSitePluginsProvider) {
+            private sitePluginsProvider: CoreSitePluginsProvider, private zone: NgZone) {
         this.logger = logger.getInstance('CoreContentLinksHelperProvider');
 
         // Listen for app launched URLs. If we receive one, check if it's a content link.
         eventsProvider.on(CoreEventsProvider.APP_LAUNCHED_URL, this.handleCustomUrl.bind(this));
+    }
+
+    /**
+     * Check whether a link can be handled by the app.
+     *
+     * @param {string} url URL to handle.
+     * @param {number} [courseId] Course ID related to the URL. Optional but recommended.
+     * @param {string} [username] Username to use to filter sites.
+     * @return {Promise<boolean>} Promise resolved with a boolean: whether the URL can be handled.
+     */
+    canHandleLink(url: string, courseId?: number, username?: string): Promise<boolean> {
+        return this.contentLinksDelegate.getActionsFor(url, undefined, username).then((actions) => {
+            return !!this.getFirstValidAction(actions);
+        }).catch(() => {
+            return false;
+        });
     }
 
     /**
@@ -75,11 +91,15 @@ export class CoreContentLinksHelperProvider {
      */
     goInSite(navCtrl: NavController, pageName: string, pageParams: any, siteId?: string): void {
         siteId = siteId || this.sitesProvider.getCurrentSiteId();
-        if (navCtrl && siteId == this.sitesProvider.getCurrentSiteId()) {
-            navCtrl.push(pageName, pageParams);
-        } else {
-            this.loginHelper.redirect(pageName, pageParams, siteId);
-        }
+
+        // Execute the code in the Angular zone, so change detection doesn't stop working.
+        this.zone.run(() => {
+            if (navCtrl && siteId == this.sitesProvider.getCurrentSiteId()) {
+                navCtrl.push(pageName, pageParams);
+            } else {
+                this.loginHelper.redirect(pageName, pageParams, siteId);
+            }
+        });
     }
 
     /**

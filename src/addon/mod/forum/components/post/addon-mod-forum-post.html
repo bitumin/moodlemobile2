@@ -1,8 +1,6 @@
-<ion-card-header text-wrap no-padding >
+<ion-card-header text-wrap no-padding id="addon-mod_forum-post-{{post.id}}">
     <ion-item text-wrap>
-        <ion-avatar item-start (click)="openUserProfile(post.userid)">
-            <img [src]="post.userpictureurl" onError="this.src='assets/img/user-avatar.png'" core-external-content [alt]="'core.pictureof' | translate:{$a: post.userfullname}" role="presentation">
-        </ion-avatar>
+        <ion-avatar core-user-avatar [user]="post" item-start (click)="openUserProfile(post.userid)"></ion-avatar>
         <h2><span [class.core-bold]="post.parent == 0"><core-format-text [text]="post.subject"></core-format-text></span></h2>
         <p>
             <ion-note float-end padding-left *ngIf="!post.modified"><ion-icon name="time"></ion-icon> {{ 'core.notsent' | translate }}</ion-note>
@@ -16,13 +14,17 @@
 </ion-card-header>
 <ion-card-content padding-top>
     <core-format-text [component]="component" [componentId]="componentId" [text]="post.message"></core-format-text>
-    <div *ngFor="let attachment of post.attachments">
-        <!-- Files already attached to the submission. -->
-        <core-file *ngIf="!attachment.name" [file]="attachment" [component]="component" [componentId]="componentId"></core-file>
-        <!-- Files stored in offline to be sent later. -->
-        <core-local-file *ngIf="attachment.name" [file]="attachment"></core-local-file>
+    <div no-lines>
+        <ng-container *ngFor="let attachment of post.attachments">
+            <!-- Files already attached to the submission. -->
+            <core-file *ngIf="!attachment.name" [file]="attachment" [component]="component" [componentId]="componentId"></core-file>
+            <!-- Files stored in offline to be sent later. -->
+            <core-local-file *ngIf="attachment.name" [file]="attachment"></core-local-file>
+        </ng-container>
     </div>
 </ion-card-content>
+<core-rating-rate *ngIf="forum && ratingInfo" [ratingInfo]="ratingInfo" contextLevel="module" [instanceId]="componentId" [itemId]="post.id" [itemSetId]="discussionId" [courseId]="courseId" [aggregateMethod]="forum.assessed" [scaleId]="forum.scale" [userId]="post.userid" (onUpdate)="ratingUpdated()"></core-rating-rate>
+<core-rating-aggregate *ngIf="forum && ratingInfo" [ratingInfo]="ratingInfo" contextLevel="module" [instanceId]="componentId" [itemId]="post.id" [courseId]="courseId" [aggregateMethod]="forum.assessed" [scaleId]="forum.scale"></core-rating-aggregate>
 <ion-item no-padding text-end *ngIf="post.id && post.canreply" class="addon-forum-reply-button">
     <button ion-button icon-left clear small (click)="showReply()" [attr.aria-controls]="'addon-forum-reply-edit-form-' + uniqueId" [attr.aria-expanded]="replyData.replyingTo === post.id">
         <ion-icon name="undo"></ion-icon> {{ 'addon.mod_forum.reply' | translate }}

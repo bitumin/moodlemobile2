@@ -14,14 +14,13 @@
 
 import { Component, Optional, Injector, ViewChild } from '@angular/core';
 import { Content, NavController } from 'ionic-angular';
-import { CoreGroupsProvider } from '@providers/groups';
+import { CoreGroupsProvider, CoreGroupInfo } from '@providers/groups';
 import { CoreTimeUtilsProvider } from '@providers/utils/time';
 import { CoreCourseModuleMainActivityComponent } from '@core/course/classes/main-activity-component';
 import { AddonModAssignProvider } from '../../providers/assign';
 import { AddonModAssignHelperProvider } from '../../providers/helper';
 import { AddonModAssignOfflineProvider } from '../../providers/assign-offline';
 import { AddonModAssignSyncProvider } from '../../providers/assign-sync';
-import * as moment from 'moment';
 import { AddonModAssignSubmissionComponent } from '../submission/submission';
 
 /**
@@ -38,12 +37,19 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
     moduleName = 'assign';
 
     assign: any; // The assign object.
-    canViewSubmissions: boolean; // Whether the user can view all submissions.
+    canViewAllSubmissions: boolean; // Whether the user can view all submissions.
+    canViewOwnSubmission: boolean; // Whether the user can view their own submission.
     timeRemaining: string; // Message about time remaining to submit.
     lateSubmissions: string; // Message about late submissions.
     showNumbers = true; // Whether to show number of submissions with each status.
     summary: any; // The summary.
     needsGradingAvalaible: boolean; // Whether we can see the submissions that need grading.
+
+    groupInfo: CoreGroupInfo = {
+        groups: [],
+        separateGroups: false,
+        visibleGroups: false
+    };
 
     // Status.
     submissionStatusSubmitted = AddonModAssignProvider.SUBMISSION_STATUS_SUBMITTED;
@@ -75,19 +81,19 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
 
         this.loadContent(false, true).then(() => {
             this.assignProvider.logView(this.assign.id).then(() => {
-                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completionstatus);
+                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completiondata);
             }).catch(() => {
                 // Ignore errors.
             });
 
-            if (!this.canViewSubmissions) {
-                // User can only see his submission, log view the user submission.
-                this.assignProvider.logSubmissionView(this.assign.id).catch(() => {
-                    // Ignore errors.
-                });
-            } else {
+            if (this.canViewAllSubmissions) {
                 // User can see all submissions, log grading view.
                 this.assignProvider.logGradingView(this.assign.id).catch(() => {
+                    // Ignore errors.
+                });
+            } else if (this.canViewOwnSubmission) {
+                // User can only see their own submission, log view the user submission.
+                this.assignProvider.logSubmissionView(this.assign.id).catch(() => {
                     // Ignore errors.
                 });
             }
@@ -104,7 +110,7 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
         this.submittedObserver = this.eventsProvider.on(AddonModAssignProvider.SUBMITTED_FOR_GRADING_EVENT, (data) => {
             if (this.assign && data.assignmentId == this.assign.id && data.userId == this.userId) {
                 // Assignment submitted, check completion.
-                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completionstatus);
+                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completiondata);
 
                 // Reload data since it can have offline data now.
                 this.showLoadingAndRefresh(true, false);
@@ -136,7 +142,7 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
      * Get assignment data.
      *
      * @param {boolean} [refresh=false] If it's refreshing content.
-     * @param {boolean} [sync=false] If the refresh is needs syncing.
+     * @param {boolean} [sync=false] If it should try to sync.
      * @param {boolean} [showErrors=false] If show errors to the user of hide them.
      * @return {Promise<any>} Promise resolved when done.
      */
@@ -165,7 +171,7 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
             return this.assignProvider.getSubmissions(this.assign.id).then((data) => {
                 const time = this.timeUtils.timestamp();
 
-                this.canViewSubmissions = data.canviewsubmissions;
+                this.canViewAllSubmissions = data.canviewsubmissions;
 
                 if (data.canviewsubmissions) {
 
@@ -178,10 +184,8 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
 
                             if (this.assign.cutoffdate) {
                                 if (this.assign.cutoffdate > time) {
-                                    const dateFormat = this.translate.instant('core.dfmediumdate');
-
                                     this.lateSubmissions = this.translate.instant('addon.mod_assign.latesubmissionsaccepted',
-                                            {$a: moment(this.assign.cutoffdate * 1000).format(dateFormat)});
+                                            {$a: this.timeUtils.userDate(this.assign.cutoffdate * 1000)});
                                 } else {
                                     this.lateSubmissions = this.translate.instant('addon.mod_assign.nomoresubmissionsaccepted');
                                 }
@@ -195,21 +199,47 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
                     }
 
                     // Check if groupmode is enabled to avoid showing wrong numbers.
-                    return this.groupsProvider.activityHasGroups(this.assign.cmid).then((hasGroups) => {
-                        this.showNumbers = !hasGroups;
+                    return this.groupsProvider.getActivityGroupInfo(this.assign.cmid, false).then((groupInfo) => {
+                        this.groupInfo = groupInfo;
+                        this.showNumbers = groupInfo.groups.length == 0 ||
+                            this.sitesProvider.getCurrentSite().isVersionGreaterEqualThan('3.5');
 
-                        return this.assignProvider.getSubmissionStatus(this.assign.id).then((response) => {
-                            this.summary = response.gradingsummary;
-
-                            this.needsGradingAvalaible = response.gradingsummary.submissionsneedgradingcount > 0 &&
-                                    this.sitesProvider.getCurrentSite().isVersionGreaterEqualThan('3.2');
-                        });
+                        return this.setGroup(this.group || (groupInfo.groups && groupInfo.groups[0] && groupInfo.groups[0].id) ||
+                            0);
                     });
                 }
+
+                // Check if the user can view their own submission.
+                return this.assignProvider.getSubmissionStatus(this.assign.id).then(() => {
+                    this.canViewOwnSubmission = true;
+                }).catch((error) => {
+                    this.canViewOwnSubmission = false;
+
+                    if (error.errorcode !== 'nopermission') {
+                        return Promise.reject(error);
+                    }
+                });
             });
         }).then(() => {
             // All data obtained, now fill the context menu.
             this.fillContextMenu(refresh);
+        });
+    }
+
+    /**
+     * Set group to see the summary.
+     *
+     * @param  {number}       groupId Group ID.
+     * @return {Promise<any>}         Resolved when done.
+     */
+    setGroup(groupId: number): Promise<any> {
+        this.group = groupId;
+
+        return this.assignProvider.getSubmissionStatus(this.assign.id, undefined, this.group).then((response) => {
+            this.summary = response.gradingsummary;
+
+            this.needsGradingAvalaible = response.gradingsummary && response.gradingsummary.submissionsneedgradingcount > 0 &&
+                    this.sitesProvider.getCurrentSite().isVersionGreaterEqualThan('3.2');
         });
     }
 
@@ -223,6 +253,7 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
         if (typeof status == 'undefined') {
             this.navCtrl.push('AddonModAssignSubmissionListPage', {
                 courseId: this.courseId,
+                groupId: this.group || 0,
                 moduleId: this.module.id,
                 moduleName: this.moduleName
             });
@@ -230,6 +261,7 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
             this.navCtrl.push('AddonModAssignSubmissionListPage', {
                 status: status,
                 courseId: this.courseId,
+                groupId: this.group || 0,
                 moduleId: this.module.id,
                 moduleName: this.moduleName
             });
@@ -263,8 +295,8 @@ export class AddonModAssignIndexComponent extends CoreCourseModuleMainActivityCo
         if (this.assign) {
             promises.push(this.assignProvider.invalidateAllSubmissionData(this.assign.id));
 
-            if (this.canViewSubmissions) {
-                promises.push(this.assignProvider.invalidateSubmissionStatusData(this.assign.id));
+            if (this.canViewAllSubmissions) {
+                promises.push(this.assignProvider.invalidateSubmissionStatusData(this.assign.id, undefined, this.group));
             }
         }
 

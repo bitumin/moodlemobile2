@@ -17,6 +17,7 @@ import { CoreAppProvider } from '@providers/app';
 import { CoreFilepoolProvider } from '@providers/filepool';
 import { CoreSitesProvider } from '@providers/sites';
 import { CoreUtilsProvider } from '@providers/utils/utils';
+import { CoreCourseLogHelperProvider } from '@core/course/providers/log-helper';
 import { AddonModWorkshopOfflineProvider } from './offline';
 
 /**
@@ -34,6 +35,9 @@ export class AddonModWorkshopProvider {
     static EXAMPLES_VOLUNTARY: 0;
     static EXAMPLES_BEFORE_SUBMISSION: 1;
     static EXAMPLES_BEFORE_ASSESSMENT: 2;
+    static SUBMISSION_TYPE_DISABLED = 0;
+    static SUBMISSION_TYPE_AVAILABLE = 1;
+    static SUBMISSION_TYPE_REQUIRED = 2;
 
     static SUBMISSION_CHANGED = 'addon_mod_workshop_submission_changed';
     static ASSESSMENT_SAVED = 'addon_mod_workshop_assessment_saved';
@@ -46,7 +50,8 @@ export class AddonModWorkshopProvider {
             private filepoolProvider: CoreFilepoolProvider,
             private sitesProvider: CoreSitesProvider,
             private utils: CoreUtilsProvider,
-            private workshopOffline: AddonModWorkshopOfflineProvider) {}
+            private workshopOffline: AddonModWorkshopOfflineProvider,
+            private logHelper: CoreCourseLogHelperProvider) {}
 
     /**
      * Get cache key for workshop data WS calls.
@@ -223,6 +228,19 @@ export class AddonModWorkshopProvider {
                 }
 
                 return Promise.reject(null);
+            }).then((workshop) => {
+                // Set submission types for Moodle 3.5 and older.
+                if (typeof workshop.submissiontypetext == 'undefined') {
+                    if (workshop.nattachments > 0) {
+                        workshop.submissiontypetext = AddonModWorkshopProvider.SUBMISSION_TYPE_AVAILABLE;
+                        workshop.submissiontypefile = AddonModWorkshopProvider.SUBMISSION_TYPE_AVAILABLE;
+                    } else {
+                        workshop.submissiontypetext = AddonModWorkshopProvider.SUBMISSION_TYPE_REQUIRED;
+                        workshop.submissiontypefile = AddonModWorkshopProvider.SUBMISSION_TYPE_DISABLED;
+                    }
+                }
+
+                return workshop;
             });
         });
     }
@@ -1343,34 +1361,31 @@ export class AddonModWorkshopProvider {
     /**
      * Report the workshop as being viewed.
      *
-     * @param  {string} id       Workshop ID.
+     * @param  {number} id       Workshop ID.
      * @param  {string} [siteId] Site ID. If not defined, current site.
      * @return {Promise<any>}    Promise resolved when the WS call is successful.
      */
     logView(id: number, siteId?: string): Promise<any> {
-        return this.sitesProvider.getSite(siteId).then((site) => {
-            const params = {
-                workshopid: id
-            };
+        const params = {
+            workshopid: id
+        };
 
-            return site.write('mod_workshop_view_workshop', params);
-        });
+        return this.logHelper.log('mod_workshop_view_workshop', params, AddonModWorkshopProvider.COMPONENT, id, siteId);
     }
 
     /**
      * Report the workshop submission as being viewed.
      *
-     * @param  {string} id       Submission ID.
+     * @param  {number} id          Submission ID.
+     * @param  {number} workshopId  Workshop ID.
      * @param  {string} [siteId] Site ID. If not defined, current site.
      * @return {Promise<any>}    Promise resolved when the WS call is successful.
      */
-    logViewSubmission(id: number, siteId?: string): Promise<any> {
-        return this.sitesProvider.getSite(siteId).then((site) => {
-            const params = {
-                submissionid: id
-            };
+    logViewSubmission(id: number, workshopId: number, siteId?: string): Promise<any> {
+        const params = {
+            submissionid: id
+        };
 
-            return site.write('mod_workshop_view_submission', params);
-        });
+        return this.logHelper.log('mod_workshop_view_submission', params, AddonModWorkshopProvider.COMPONENT, workshopId, siteId);
     }
 }

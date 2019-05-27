@@ -3,6 +3,7 @@
     <core-context-menu>
         <core-context-menu-item *ngIf="externalUrl" [priority]="900" [content]="'core.openinbrowser' | translate" [href]="externalUrl" [iconAction]="'open'"></core-context-menu-item>
         <core-context-menu-item *ngIf="description" [priority]="800" [content]="'core.moduleintro' | translate" (action)="expandDescription()" [iconAction]="'arrow-forward'"></core-context-menu-item>
+        <core-context-menu-item *ngIf="blog" [priority]="750" content="{{'addon.blog.blog' | translate}}" [iconAction]="'fa-newspaper-o'" (action)="gotoBlog($event)"></core-context-menu-item>
         <core-context-menu-item *ngIf="loaded && !hasOffline && isOnline" [priority]="700" [content]="'core.refresh' | translate" (action)="doRefresh(null, $event)" [iconAction]="refreshIcon" [closeOnClick]="false"></core-context-menu-item>
         <core-context-menu-item *ngIf="loaded && hasOffline && isOnline"  [priority]="600" [content]="'core.settings.synchronizenow' | translate" (action)="doRefresh(null, $event, true)" [iconAction]="syncIcon" [closeOnClick]="false"></core-context-menu-item>
         <core-context-menu-item *ngIf="prefetchStatusIcon" [priority]="500" [content]="prefetchText" (action)="prefetch()" [iconAction]="prefetchStatusIcon" [closeOnClick]="false"></core-context-menu-item>
@@ -49,7 +50,7 @@
             </ion-card>
 
             <ion-card class="with-borders" *ngIf="userGrades">
-                <ion-item-divider color="light" text-wrap>
+                <ion-item-divider text-wrap>
                     <h2>{{ 'addon.mod_workshop.yourgrades' | translate }}</h2>
                 </ion-item-divider>
                 <ion-item text-wrap *ngIf="userGrades.submissionlongstrgrade">
@@ -78,7 +79,7 @@
             </ion-item>
 
             <ng-container *ngIf="submission">
-                <ion-item-divider color="light" text-wrap>
+                <ion-item-divider text-wrap>
                     <h2>{{ 'addon.mod_workshop.yoursubmission' | translate }}</h2>
                 </ion-item-divider>
                 <addon-mod-workshop-submission [submission]="submission" [courseId]="workshop.course" [module]="module" [workshop]="workshop" [access]="access"></addon-mod-workshop-submission>
@@ -101,7 +102,7 @@
 
         <ng-container *ngIf="workshop.phase >= workshopPhases.PHASE_CLOSED">
             <ion-card class="with-borders" *ngIf="publishedSubmissions && publishedSubmissions.length">
-                <ion-item-divider color="light" text-wrap>
+                <ion-item-divider text-wrap>
                     <h2>{{ 'addon.mod_workshop.publishedsubmissions' | translate }}</h2>
                 </ion-item-divider>
                 <ng-container *ngFor="let submission of publishedSubmissions">
@@ -120,7 +121,7 @@
             </ion-card>
 
             <ion-card class="with-borders" *ngIf="canAssess">
-                <ion-item-divider color="light" text-wrap>
+                <ion-item-divider text-wrap>
                     <h2>{{ 'addon.mod_workshop.assignedassessments' | translate }}</h2>
                 </ion-item-divider>
                 <ion-item text-wrap *ngIf="!assessments || !assessments.length">
@@ -134,16 +135,16 @@
 
         <!-- MULTIPLE PHASES SUBMISSION OR GREATER only teachers -->
         <ion-card class="with-borders" *ngIf="access.canviewallsubmissions && workshop.phase >= workshopPhases.PHASE_SUBMISSION && ((grades && grades.length) || (groupInfo && (groupInfo.separateGroups || groupInfo.visibleGroups)))">
-            <ion-item-divider color="light" text-wrap *ngIf="workshop.phase == workshopPhases.PHASE_SUBMISSION">
+            <ion-item-divider text-wrap *ngIf="workshop.phase == workshopPhases.PHASE_SUBMISSION">
                 <h2>{{ 'addon.mod_workshop.submissionsreport' | translate }}</h2>
             </ion-item-divider>
-           <ion-item-divider color="light" text-wrap *ngIf="workshop.phase > workshopPhases.PHASE_SUBMISSION">
+           <ion-item-divider text-wrap *ngIf="workshop.phase > workshopPhases.PHASE_SUBMISSION">
                 <h2>{{ 'addon.mod_workshop.gradesreport' | translate }}</h2>
             </ion-item-divider>
             <ion-item text-wrap *ngIf="groupInfo && (groupInfo.separateGroups || groupInfo.visibleGroups)">
                 <ion-label id="addon-workshop-groupslabel" *ngIf="groupInfo.separateGroups">{{ 'core.groupsseparate' | translate }}</ion-label>
                 <ion-label id="addon-workshop-groupslabel" *ngIf="groupInfo.visibleGroups">{{ 'core.groupsvisible' | translate }}</ion-label>
-                <ion-select [(ngModel)]="selectedGroup" (ionChange)="setGroup(selectedGroup)" aria-labelledby="addon-workshop-groupslabel" interface="popover">
+                <ion-select [(ngModel)]="selectedGroup" (ionChange)="setGroup(selectedGroup)" aria-labelledby="addon-workshop-groupslabel" interface="action-sheet">
                     <ion-option *ngFor="let groupOpt of groupInfo.groups" [value]="groupOpt.id">{{groupOpt.name}}</ion-option>
                 </ion-select>
             </ion-item>

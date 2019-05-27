@@ -26,9 +26,12 @@ import { MockLocationStrategy } from '@angular/common/testing';
 import { TranslateModule, TranslateLoader } from '@ngx-translate/core';
 import { TranslateHttpLoader } from '@ngx-translate/http-loader';
 
+import { ScreenOrientation } from '@ionic-native/screen-orientation';
+
 import { MoodleMobileApp } from './app.component';
 import { CoreInterceptor } from '@classes/interceptor';
 import { CorePageTransition } from '@classes/page-transition';
+import { CoreModalLateralTransition } from '@classes/modal-lateral-transition';
 import { CoreLoggerProvider } from '@providers/logger';
 import { CoreDbProvider } from '@providers/db';
 import { CoreAppProvider } from '@providers/app';
@@ -75,14 +78,24 @@ import { CoreSitePluginsModule } from '@core/siteplugins/siteplugins.module';
 import { CoreCompileModule } from '@core/compile/compile.module';
 import { CoreQuestionModule } from '@core/question/question.module';
 import { CoreCommentsModule } from '@core/comments/comments.module';
+import { CoreBlockModule } from '@core/block/block.module';
+import { CoreRatingModule } from '@core/rating/rating.module';
 
 // Addon modules.
 import { AddonBadgesModule } from '@addon/badges/badges.module';
+import { AddonBlogModule } from '@addon/blog/blog.module';
 import { AddonCalendarModule } from '@addon/calendar/calendar.module';
 import { AddonCompetencyModule } from '@addon/competency/competency.module';
 import { AddonCourseCompletionModule } from '@addon/coursecompletion/coursecompletion.module';
 import { AddonUserProfileFieldModule } from '@addon/userprofilefield/userprofilefield.module';
 import { AddonFilesModule } from '@addon/files/files.module';
+import { AddonBlockActivityModulesModule } from '@addon/block/activitymodules/activitymodules.module';
+import { AddonBlockMyOverviewModule } from '@addon/block/myoverview/myoverview.module';
+import { AddonBlockSiteMainMenuModule } from '@addon/block/sitemainmenu/sitemainmenu.module';
+import { AddonBlockTimelineModule } from '@addon/block/timeline/timeline.module';
+import { AddonBlockRecentlyAccessedCoursesModule } from '@addon/block/recentlyaccessedcourses/recentlyaccessedcourses.module';
+import { AddonBlockRecentlyAccessedItemsModule } from '@addon/block/recentlyaccesseditems/recentlyaccesseditems.module';
+import { AddonBlockStarredCoursesModule } from '@addon/block/starredcourses/starredcourses.module';
 import { AddonModAssignModule } from '@addon/mod/assign/assign.module';
 import { AddonModBookModule } from '@addon/mod/book/book.module';
 import { AddonModChatModule } from '@addon/mod/chat/chat.module';
@@ -186,12 +199,22 @@ export const CORE_PROVIDERS: any[] = [
         CoreCompileModule,
         CoreQuestionModule,
         CoreCommentsModule,
+        CoreBlockModule,
+        CoreRatingModule,
         AddonBadgesModule,
+        AddonBlogModule,
         AddonCalendarModule,
         AddonCompetencyModule,
         AddonCourseCompletionModule,
         AddonUserProfileFieldModule,
         AddonFilesModule,
+        AddonBlockActivityModulesModule,
+        AddonBlockMyOverviewModule,
+        AddonBlockSiteMainMenuModule,
+        AddonBlockTimelineModule,
+        AddonBlockRecentlyAccessedCoursesModule,
+        AddonBlockRecentlyAccessedItemsModule,
+        AddonBlockStarredCoursesModule,
         AddonModAssignModule,
         AddonModBookModule,
         AddonModChatModule,
@@ -260,6 +283,7 @@ export const CORE_PROVIDERS: any[] = [
             useClass: CoreInterceptor,
             multi: true,
         },
+        ScreenOrientation,
         {provide: COMPILER_OPTIONS, useValue: {}, multi: true},
         {provide: JitCompilerFactory, useClass: JitCompilerFactory, deps: [COMPILER_OPTIONS]},
         {provide: LocationStrategy, useClass: MockLocationStrategy},
@@ -267,7 +291,7 @@ export const CORE_PROVIDERS: any[] = [
 })
 export class AppModule {
     constructor(platform: Platform, initDelegate: CoreInitDelegate, updateManager: CoreUpdateManagerProvider, config: Config,
-            sitesProvider: CoreSitesProvider, fileProvider: CoreFileProvider) {
+            sitesProvider: CoreSitesProvider, fileProvider: CoreFileProvider, private eventsProvider: CoreEventsProvider) {
         // Register a handler for platform ready.
         initDelegate.registerProcess({
             name: 'CorePlatformReady',
@@ -300,6 +324,7 @@ export class AppModule {
 
         // Set transition animation.
         config.setTransition('core-page-transition', CorePageTransition);
+        config.setTransition('core-modal-lateral-transition', CoreModalLateralTransition);
 
         // Decorate ion-content.
         this.decorateIonContent();
@@ -464,6 +489,52 @@ export class AppModule {
 
             // Initial imgs refresh.
             this.imgsUpdate();
+        };
+
+        const eventsProvider = this.eventsProvider;
+
+        // tslint:disable: typedef
+        (<any> Content).prototype.ngAfterViewInit = function() {
+            assert(this.getFixedElement(), 'fixed element was not found');
+            assert(this.getScrollElement(), 'scroll element was not found');
+
+            const scroll = this._scroll;
+            scroll.ev.fixedElement = this.getFixedElement();
+            scroll.ev.scrollElement = this.getScrollElement();
+
+            // Subscribe to the scroll start
+            scroll.onScrollStart = (ev) => {
+                this.ionScrollStart.emit(ev);
+            };
+
+            // Subscribe to every scroll move
+            scroll.onScroll = (ev) => {
+                // Emit to all of our other friends things be scrolling
+                this.ionScroll.emit(ev);
+
+                this.imgsUpdate();
+            };
+
+            // Subscribe to the scroll end
+            scroll.onScrollEnd = (ev) => {
+                this.ionScrollEnd.emit(ev);
+
+                this.imgsUpdate();
+            };
+
+            // Recalculate size when screen rotates.
+            this._orientationObs = eventsProvider.on(CoreEventsProvider.ORIENTATION_CHANGE, this.resize.bind(this));
+        };
+
+        // tslint:disable: typedef
+        (<any> Content).prototype.ngOnDestroy = function() {
+            this._scLsn && this._scLsn();
+            this._viewCtrlReadSub && this._viewCtrlReadSub.unsubscribe();
+            this._viewCtrlWriteSub && this._viewCtrlWriteSub.unsubscribe();
+            this._viewCtrlReadSub = this._viewCtrlWriteSub = null;
+            this._scroll && this._scroll.destroy();
+            this._footerEle = this._scLsn = this._scroll = null;
+            this._orientationObs && this._orientationObs.off();
         };
     }
 }

@@ -29,7 +29,7 @@ import { AddonNotesProvider } from '../../providers/notes';
 export class AddonNotesAddPage {
     userId: number;
     courseId: number;
-    publishState = 'personal';
+    type = 'personal';
     text = '';
     processing = false;
 
@@ -37,20 +37,25 @@ export class AddonNotesAddPage {
             private domUtils: CoreDomUtilsProvider, private notesProvider: AddonNotesProvider) {
         this.userId = params.get('userId');
         this.courseId = params.get('courseId');
+        this.type = params.get('type') || 'personal';
     }
 
     /**
      * Send the note or store it offline.
+     *
+     * @param {Event} e Event.
      */
-    addNote(): void {
+    addNote(e: Event): void {
+        e.preventDefault();
+        e.stopPropagation();
+
         this.appProvider.closeKeyboard();
         const loadingModal = this.domUtils.showModalLoading('core.sending', true);
         // Freeze the add note button.
         this.processing = true;
-        this.notesProvider.addNote(this.userId, this.courseId, this.publishState, this.text).then((sent) => {
-            this.viewCtrl.dismiss().finally(() => {
-                const message = sent ? 'addon.notes.eventnotecreated' : 'core.datastoredoffline';
-                this.domUtils.showAlertTranslated('core.success', message);
+        this.notesProvider.addNote(this.userId, this.courseId, this.type, this.text).then((sent) => {
+            this.viewCtrl.dismiss({type: this.type, sent: true}).finally(() => {
+                this.domUtils.showToast(sent ? 'addon.notes.eventnotecreated' : 'core.datastoredoffline', true, 3000);
             });
         }).catch((error) => {
             this.domUtils.showErrorModal(error);
@@ -64,6 +69,6 @@ export class AddonNotesAddPage {
      * Close modal.
      */
     closeModal(): void {
-        this.viewCtrl.dismiss();
+        this.viewCtrl.dismiss({type: this.type});
     }
 }

@@ -3,8 +3,9 @@
     <core-context-menu>
         <core-context-menu-item *ngIf="externalUrl" [priority]="900" [content]="'core.openinbrowser' | translate" [href]="externalUrl" [iconAction]="'open'"></core-context-menu-item>
         <core-context-menu-item *ngIf="description" [priority]="800" [content]="'core.moduleintro' | translate" (action)="expandDescription()" [iconAction]="'arrow-forward'"></core-context-menu-item>
-        <core-context-menu-item *ngIf="loaded && !hasOffline && isOnline" [priority]="700" [content]="'addon.mod_forum.refreshdiscussions' | translate" (action)="doRefresh(null, $event)" [iconAction]="refreshIcon" [closeOnClick]="false"></core-context-menu-item>
-        <core-context-menu-item *ngIf="loaded && hasOffline && isOnline"  [priority]="600" [content]="'core.settings.synchronizenow' | translate" (action)="doRefresh(null, $event, true)" [iconAction]="syncIcon" [closeOnClick]="false"></core-context-menu-item>
+        <core-context-menu-item *ngIf="blog" [priority]="750" content="{{'addon.blog.blog' | translate}}" [iconAction]="'fa-newspaper-o'" (action)="gotoBlog($event)"></core-context-menu-item>
+        <core-context-menu-item *ngIf="loaded && !(hasOffline || hasOfflineRatings) && isOnline" [priority]="700" [content]="'addon.mod_forum.refreshdiscussions' | translate" (action)="doRefresh(null, $event)" [iconAction]="refreshIcon" [closeOnClick]="false"></core-context-menu-item>
+        <core-context-menu-item *ngIf="loaded && (hasOffline || hasOfflineRatings) && isOnline"  [priority]="600" [content]="'core.settings.synchronizenow' | translate" (action)="doRefresh(null, $event, true)" [iconAction]="syncIcon" [closeOnClick]="false"></core-context-menu-item>
         <core-context-menu-item *ngIf="prefetchStatusIcon" [priority]="500" [content]="prefetchText" (action)="prefetch()" [iconAction]="prefetchStatusIcon" [closeOnClick]="false"></core-context-menu-item>
         <core-context-menu-item *ngIf="size" [priority]="400" [content]="size" [iconDescription]="'cube'" (action)="removeFiles()" [iconAction]="'trash'"></core-context-menu-item>
     </core-context-menu>
@@ -12,7 +13,7 @@
 
 <!-- Content. -->
 <core-split-view>
-    <ion-content [class.has-fab]="forum && forum.cancreatediscussions">
+    <ion-content>
         <ion-refresher [enabled]="loaded" (ionRefresh)="doRefresh($event)">
             <ion-refresher-content pullingText="{{ 'core.pulltorefresh' | translate }}"></ion-refresher-content>
         </ion-refresher>
@@ -20,16 +21,14 @@
             <core-course-module-description [description]="description" [component]="component" [componentId]="componentId" [note]="descriptionNote"></core-course-module-description>
 
             <!-- Forum discussions found to be synchronized -->
-            <ion-card class="core-warning-card" icon-start *ngIf="hasOffline">
+            <ion-card class="core-warning-card" icon-start *ngIf="hasOffline || hasOfflineRatings">
                 <ion-icon name="warning"></ion-icon> {{ 'core.hasdatatosync' | translate:{$a: moduleName} }}
             </ion-card>
 
             <ng-container *ngIf="forum && discussions.length > 0">
                 <ion-card *ngFor="let discussion of offlineDiscussions" (click)="openNewDiscussion(discussion.timecreated)" [class.addon-forum-discussion-selected]="discussion.timecreated == -selectedDiscussion">
                     <ion-item text-wrap>
-                        <ion-avatar item-start core-user-link [userId]="discussion.userid" [courseId]="courseId">
-                            <img [src]="discussion.userpictureurl" onError="this.src='assets/img/user-avatar.png'" core-external-content [alt]="'core.pictureof' | translate:{$a: discussion.userfullname}" role="presentation">
-                        </ion-avatar>
+                        <ion-avatar core-user-avatar [user]="discussion" item-start [courseId]="courseId"></ion-avatar>
                         <h2><core-format-text [text]="discussion.subject"></core-format-text></h2>
                         <p *ngIf="discussion.userfullname">
                             <ion-note float-end padding-left><ion-icon name="time"></ion-icon> {{ 'core.notsent' | translate }}</ion-note>
@@ -45,10 +44,8 @@
                 </ion-card>
                 <ion-card *ngFor="let discussion of discussions" (click)="openDiscussion(discussion)" [class.addon-forum-discussion-selected]="discussion.discussion == selectedDiscussion">
                     <ion-item text-wrap>
-                        <ion-avatar item-start core-user-link [userId]="discussion.userid" [courseId]="courseId">
-                            <img [src]="discussion.userpictureurl" onError="this.src='assets/img/user-avatar.png'" core-external-content [alt]="'core.pictureof' | translate:{$a: discussion.userfullname}" role="presentation">
-                        </ion-avatar>
-                        <h2><ion-icon name="pin" *ngIf="discussion.pinned"></ion-icon> <core-format-text [text]="discussion.subject"></core-format-text></h2>
+                        <ion-avatar core-user-avatar [user]="discussion" item-start [courseId]="courseId"></ion-avatar>
+                        <h2><core-icon name="fa-map-pin" *ngIf="discussion.pinned"></core-icon> <core-format-text [text]="discussion.subject"></core-format-text></h2>
                         <p>
                             <ion-note float-end padding-left text-end>
                                 {{discussion.created | coreDateDayOrTime}}
@@ -80,7 +77,7 @@
                 </ion-card>
             </ng-container>
 
-            <core-empty-box *ngIf="forum && discussions.length == 0" icon="chatbubbles" [message]="'addon.mod_forum.forumnodiscussionsyet' | translate">
+            <core-empty-box *ngIf="forum && discussions.length == 0" icon="chatbubbles" [message]="'addon.mod_forum.forumnodiscussionsyet' | translate" class="core-empty-box-clickable">
                 <div padding *ngIf="forum.cancreatediscussions">
                     <button ion-button block (click)="openNewDiscussion()">
                         {{ 'addon.mod_forum.addanewdiscussion' | translate }}
@@ -88,12 +85,10 @@
                 </div>
             </core-empty-box>
 
-            <ion-infinite-scroll [enabled]="canLoadMore" (ionInfinite)="$event.waitFor(fetchMoreDiscussions())">
-                <ion-infinite-scroll-content></ion-infinite-scroll-content>
-            </ion-infinite-scroll>
+            <core-infinite-loading [enabled]="canLoadMore" (action)="fetchMoreDiscussions($event)" [error]="loadMoreError"></core-infinite-loading>
         </core-loading>
 
-        <ion-fab bottom end *ngIf="forum && forum.cancreatediscussions">
+        <ion-fab core-fab bottom end *ngIf="forum && forum.cancreatediscussions">
             <button ion-fab (click)="openNewDiscussion()" [attr.aria-label]="addDiscussionText">
                 <ion-icon name="add"></ion-icon>
             </button>

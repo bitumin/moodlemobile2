@@ -15,6 +15,7 @@
 import { Component, OnInit, ViewChild } from '@angular/core';
 import { IonicPage, NavController, NavParams } from 'ionic-angular';
 import { CoreAppProvider } from '@providers/app';
+import { CoreDomUtilsProvider } from '@providers/utils/dom';
 import { CoreCourseProvider } from '@core/course/providers/course';
 import { AddonModAssignProvider } from '../../providers/assign';
 import { AddonModAssignSubmissionComponent } from '../../components/submission/submission';
@@ -44,7 +45,8 @@ export class AddonModAssignSubmissionReviewPage implements OnInit {
     protected forceLeave = false; // To allow leaving the page without checking for changes.
 
     constructor(navParams: NavParams, protected navCtrl: NavController, protected courseProvider: CoreCourseProvider,
-            protected appProvider: CoreAppProvider, protected assignProvider: AddonModAssignProvider) {
+            protected appProvider: CoreAppProvider, protected assignProvider: AddonModAssignProvider,
+            protected domUtils: CoreDomUtilsProvider) {
 
         this.moduleId = navParams.get('moduleId');
         this.courseId = navParams.get('courseId');
@@ -130,7 +132,8 @@ export class AddonModAssignSubmissionReviewPage implements OnInit {
         if (this.assign) {
             promises.push(this.assignProvider.invalidateSubmissionData(this.assign.id));
             promises.push(this.assignProvider.invalidateAssignmentUserMappingsData(this.assign.id));
-            promises.push(this.assignProvider.invalidateSubmissionStatusData(this.assign.id, this.submitId, this.blindMarking));
+            promises.push(this.assignProvider.invalidateSubmissionStatusData(this.assign.id, this.submitId, undefined,
+                this.blindMarking));
         }
 
         return Promise.all(promises).finally(() => {
@@ -162,6 +165,8 @@ export class AddonModAssignSubmissionReviewPage implements OnInit {
                     this.forceLeave = true;
                     this.navCtrl.pop();
                 }
+            }).catch((error) => {
+                this.domUtils.showErrorModalDefault(error, 'core.error', true);
             });
         }
     }

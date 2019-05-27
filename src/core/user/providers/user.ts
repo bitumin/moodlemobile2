@@ -16,7 +16,7 @@ import { Injectable } from '@angular/core';
 import { CoreFilepoolProvider } from '@providers/filepool';
 import { CoreLoggerProvider } from '@providers/logger';
 import { CoreSite } from '@classes/site';
-import { CoreSitesProvider } from '@providers/sites';
+import { CoreSitesProvider, CoreSiteSchema } from '@providers/sites';
 import { CoreUtilsProvider } from '@providers/utils/utils';
 
 /**
@@ -31,33 +31,37 @@ export class CoreUserProvider {
 
     // Variables for database.
     protected USERS_TABLE = 'users';
-    protected tablesSchema = [
-        {
-            name: this.USERS_TABLE,
-            columns: [
-                {
-                    name: 'id',
-                    type: 'INTEGER',
-                    primaryKey: true
-                },
-                {
-                    name: 'fullname',
-                    type: 'TEXT'
-                },
-                {
-                    name: 'profileimageurl',
-                    type: 'TEXT'
-                }
-            ]
-        }
-    ];
+    protected siteSchema: CoreSiteSchema = {
+        name: 'CoreUserProvider',
+        version: 1,
+        tables: [
+            {
+                name: this.USERS_TABLE,
+                columns: [
+                    {
+                        name: 'id',
+                        type: 'INTEGER',
+                        primaryKey: true
+                    },
+                    {
+                        name: 'fullname',
+                        type: 'TEXT'
+                    },
+                    {
+                        name: 'profileimageurl',
+                        type: 'TEXT'
+                    }
+                ]
+            }
+        ]
+    };
 
     protected logger;
 
     constructor(logger: CoreLoggerProvider, private sitesProvider: CoreSitesProvider, private utils: CoreUtilsProvider,
             private filepoolProvider: CoreFilepoolProvider) {
         this.logger = logger.getInstance('CoreUserProvider');
-        this.sitesProvider.createTablesFromSchema(this.tablesSchema);
+        this.sitesProvider.registerSiteSchema(this.siteSchema);
     }
 
     /**
@@ -116,10 +120,12 @@ export class CoreUserProvider {
      * @param  {number} limitFrom   Position of the first participant to get.
      * @param  {number} limitNumber Number of participants to get.
      * @param  {string} [siteId]    Site Id. If not defined, use current site.
-     * @return {Promise<any>}       Promise to be resolved when the participants are retrieved.
+     * @param  {boolean} [ignoreCache] True if it should ignore cached data (it will always fail in offline or server down).
+     * @return {Promise<{participants: any[], canLoadMore: boolean}>} Promise resolved when the participants are retrieved.
      */
     getParticipants(courseId: number, limitFrom: number = 0, limitNumber: number = CoreUserProvider.PARTICIPANTS_LIST_LIMIT,
-            siteId?: string): Promise<any> {
+            siteId?: string, ignoreCache?: boolean): Promise<{participants: any[], canLoadMore: boolean}> {
+
         return this.sitesProvider.getSite(siteId).then((site) => {
             this.logger.debug(`Get participants for course '${courseId}' starting at '${limitFrom}'`);
 
@@ -139,9 +145,14 @@ export class CoreUserProvider {
                             value: 'siteorder'
                         }
                     ]
-                }, preSets = {
+                }, preSets: any = {
                     cacheKey: this.getParticipantsListCacheKey(courseId)
                 };
+
+            if (ignoreCache) {
+                preSets.getFromCache = false;
+                preSets.emergencyCache = false;
+            }
 
             return site.read('core_enrol_get_enrolled_users', data, preSets).then((users) => {
                 const canLoadMore = users.length >= limitNumber;
@@ -390,7 +401,7 @@ export class CoreUserProvider {
             userId = Number(userId); // Make sure it's a number.
 
             // Prevent repeats and errors.
-            if (!isNaN(userId) && !treated[userId]) {
+            if (!isNaN(userId) && !treated[userId] && userId > 0) {
                 treated[userId] = true;
 
                 promises.push(this.getProfile(userId, courseId, false, siteId).then((profile) => {

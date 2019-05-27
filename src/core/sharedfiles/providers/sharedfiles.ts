@@ -21,7 +21,7 @@ import { CoreSitesProvider } from '@providers/sites';
 import { CoreMimetypeUtilsProvider } from '@providers/utils/mimetype';
 import { CoreTextUtilsProvider } from '@providers/utils/text';
 import { Md5 } from 'ts-md5/dist/md5';
-import { SQLiteDB } from '@classes/sqlitedb';
+import { SQLiteDB, SQLiteDBTableSchema } from '@classes/sqlitedb';
 
 /**
  * Service to share files with the app.
@@ -32,7 +32,7 @@ export class CoreSharedFilesProvider {
 
     // Variables for the database.
     protected SHARED_FILES_TABLE = 'shared_files';
-    protected tableSchema = {
+    protected tableSchema: SQLiteDBTableSchema = {
         name: this.SHARED_FILES_TABLE,
         columns: [
             {
@@ -229,7 +229,7 @@ export class CoreSharedFilesProvider {
 
         // Create dir if it doesn't exist already.
         return this.fileProvider.createDir(sharedFilesFolder).then(() => {
-            return this.fileProvider.moveFile(entry.fullPath, newPath).then((newFile) => {
+            return this.fileProvider.moveExternalFile(entry.toURL(), newPath).then((newFile) => {
                 this.eventsProvider.trigger(CoreEventsProvider.FILE_SHARED, { siteId: siteId, name: newName });
 
                 return newFile;

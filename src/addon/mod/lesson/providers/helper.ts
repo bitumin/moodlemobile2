@@ -19,7 +19,6 @@ import { CoreDomUtilsProvider } from '@providers/utils/dom';
 import { CoreTextUtilsProvider } from '@providers/utils/text';
 import { CoreTimeUtilsProvider } from '@providers/utils/time';
 import { AddonModLessonProvider } from './lesson';
-import * as moment from 'moment';
 
 /**
  * Helper service that provides some features for quiz.
@@ -28,7 +27,8 @@ import * as moment from 'moment';
 export class AddonModLessonHelperProvider {
 
     constructor(private domUtils: CoreDomUtilsProvider, private fb: FormBuilder, private translate: TranslateService,
-            private textUtils: CoreTextUtilsProvider, private timeUtils: CoreTimeUtilsProvider) { }
+            private textUtils: CoreTextUtilsProvider, private timeUtils: CoreTimeUtilsProvider,
+            private lessonProvider: AddonModLessonProvider) { }
 
     /**
      * Given the HTML of next activity link, format it to extract the href and the text.
@@ -150,8 +150,15 @@ export class AddonModLessonHelperProvider {
             return contents.innerHTML.trim();
         }
 
-        // Cannot find contents element, return the page.contents (some elements like videos might not work).
-        return data.page.contents;
+        // Cannot find contents element.
+        if (this.lessonProvider.isQuestionPage(data.page.type) ||
+                data.page.qtype == AddonModLessonProvider.LESSON_PAGE_BRANCHTABLE) {
+            // Return page.contents to prevent having duplicated elements (some elements like videos might not work).
+            return data.page.contents;
+        } else {
+            // It's an end of cluster, end of branch, etc. Return the whole pagecontent to match what's displayed in web.
+            return data.pagecontent;
+        }
     }
 
     /**
@@ -430,7 +437,7 @@ export class AddonModLessonHelperProvider {
             if (hasGrade) {
                 data.grade = this.translate.instant('core.percentagenumber', {$a: retake.grade});
             }
-            data.timestart = moment(retake.timestart * 1000).format('LLL');
+            data.timestart = this.timeUtils.userDate(retake.timestart * 1000);
             if (includeDuration) {
                 data.duration = this.timeUtils.formatTime(retake.timeend - retake.timestart);
             }
@@ -438,7 +445,7 @@ export class AddonModLessonHelperProvider {
             // The user has not completed the retake.
             data.grade = this.translate.instant('addon.mod_lesson.notcompleted');
             if (retake.timestart) {
-                data.timestart = moment(retake.timestart * 1000).format('LLL');
+                data.timestart = this.timeUtils.userDate(retake.timestart * 1000);
             }
         }
 

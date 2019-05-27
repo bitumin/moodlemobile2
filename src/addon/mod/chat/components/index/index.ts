@@ -17,7 +17,6 @@ import { NavController } from 'ionic-angular';
 import { CoreCourseModuleMainActivityComponent } from '@core/course/classes/main-activity-component';
 import { CoreTimeUtilsProvider } from '@providers/utils/time';
 import { AddonModChatProvider } from '../../providers/chat';
-import * as moment from 'moment';
 
 /**
  * Component that displays a chat.
@@ -34,9 +33,10 @@ export class AddonModChatIndexComponent extends CoreCourseModuleMainActivityComp
     chatInfo: any;
 
     protected title: string;
+    protected sessionsAvailable = false;
 
     constructor(injector: Injector, private chatProvider: AddonModChatProvider, private timeUtils: CoreTimeUtilsProvider,
-            private navCtrl: NavController) {
+            protected navCtrl: NavController) {
         super(injector);
     }
 
@@ -48,7 +48,9 @@ export class AddonModChatIndexComponent extends CoreCourseModuleMainActivityComp
 
         this.loadContent().then(() => {
             this.chatProvider.logView(this.chat.id).then(() => {
-                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completionstatus);
+                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completiondata);
+            }).catch(() => {
+                // Ignore errors.
             });
         });
     }
@@ -57,7 +59,7 @@ export class AddonModChatIndexComponent extends CoreCourseModuleMainActivityComp
      * Download chat.
      *
      * @param  {boolean}      [refresh=false]    If it's refreshing content.
-     * @param  {boolean}      [sync=false]       If the refresh is needs syncing.
+     * @param  {boolean}      [sync=false]       If it should try to sync.
      * @param  {boolean}      [showErrors=false] If show errors to the user of hide them.
      * @return {Promise<any>} Promise resolved when done.
      */
@@ -71,7 +73,7 @@ export class AddonModChatIndexComponent extends CoreCourseModuleMainActivityComp
 
             if (chat.chattime && chat.schedule > 0 && span > 0) {
                 this.chatInfo = {
-                    date: moment(chat.chattime * 1000).format('LLL'),
+                    date: this.timeUtils.userDate(chat.chattime * 1000),
                     fromnow: this.timeUtils.formatTime(span)
                 };
             } else {
@@ -82,6 +84,10 @@ export class AddonModChatIndexComponent extends CoreCourseModuleMainActivityComp
 
             // All data obtained, now fill the context menu.
             this.fillContextMenu(refresh);
+
+            return this.chatProvider.areSessionsAvailable().then((available) => {
+                this.sessionsAvailable = available;
+            });
         });
     }
 
@@ -91,5 +97,12 @@ export class AddonModChatIndexComponent extends CoreCourseModuleMainActivityComp
     enterChat(): void {
         const title = this.chat.name || this.moduleName;
         this.navCtrl.push('AddonModChatChatPage', {chatId: this.chat.id, courseId: this.courseId, title: title });
+    }
+
+    /**
+     * View past sessions.
+     */
+    viewSessions(): void {
+        this.navCtrl.push('AddonModChatSessionsPage', {courseId: this.courseId, chatId: this.chat.id, cmId: this.module.id});
     }
 }

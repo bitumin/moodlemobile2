@@ -26,6 +26,7 @@ export class CoreCoursesProvider {
     static ENROL_INVALID_KEY = 'CoreCoursesEnrolInvalidKey';
     static EVENT_MY_COURSES_UPDATED = 'courses_my_courses_updated';
     static EVENT_MY_COURSES_REFRESHED = 'courses_my_courses_refreshed';
+    static EVENT_DASHBOARD_DOWNLOAD_ENABLED_CHANGED = 'dashboard_download_enabled_changed';
     protected ROOT_CACHE_KEY = 'mmCourses:';
     protected logger;
 
@@ -117,6 +118,11 @@ export class CoreCoursesProvider {
 
                         // Always add the site home ID.
                         courseIds.push(siteHomeId);
+
+                        // Sort the course IDs.
+                        courseIds.sort((a, b) => {
+                           return b - a;
+                        });
                     }
 
                     return courseIds;
@@ -128,6 +134,11 @@ export class CoreCoursesProvider {
                 if (courseIds.length > 1 && courseIds.indexOf(siteHomeId) == -1) {
                     courseIds.push(siteHomeId);
                 }
+
+                // Sort the course IDs.
+                courseIds.sort((a, b) => {
+                   return b - a;
+                });
 
                 return courseIds;
             }
@@ -379,6 +390,30 @@ export class CoreCoursesProvider {
     }
 
     /**
+     * Get the first course returned by getCoursesByField.
+     *
+     * @param {string} [field] The field to search. Can be left empty for all courses or:
+     *                             id: course id.
+     *                             ids: comma separated course ids.
+     *                             shortname: course short name.
+     *                             idnumber: course id number.
+     *                             category: category id the course belongs to.
+     * @param {any} [value] The value to match.
+     * @param {string} [siteId] Site ID. If not defined, use current site.
+     * @return {Promise<any>} Promise resolved with the first course.
+     * @since 3.2
+     */
+    getCourseByField(field?: string, value?: any, siteId?: string): Promise<any> {
+        return this.getCoursesByField(field, value, siteId).then((courses) => {
+            if (courses && courses.length > 0) {
+                return courses[0];
+            }
+
+            return Promise.reject(null);
+        });
+    }
+
+    /**
      * Get courses. They can be filtered by field.
      *
      * @param {string} [field] The field to search. Can be left empty for all courses or:
@@ -390,6 +425,7 @@ export class CoreCoursesProvider {
      * @param {any} [value] The value to match.
      * @param {string} [siteId] Site ID. If not defined, use current site.
      * @return {Promise<any[]>} Promise resolved with the courses.
+     * @since 3.2
      */
     getCoursesByField(field?: string, value?: any, siteId?: string): Promise<any[]> {
         siteId = siteId || this.sitesProvider.getCurrentSiteId();
@@ -470,12 +506,29 @@ export class CoreCoursesProvider {
     }
 
     /**
-     * Check if get courses by field WS is available.
+     * Check if get courses by field WS is available in a certain site.
      *
+     * @param {CoreSite} [site] Site to check.
      * @return {boolean} Whether get courses by field is available.
+     * @since 3.2
      */
-    isGetCoursesByFieldAvailable(): boolean {
-        return this.sitesProvider.wsAvailableInCurrentSite('core_course_get_courses_by_field');
+    isGetCoursesByFieldAvailable(site?: CoreSite): boolean {
+        site = site || this.sitesProvider.getCurrentSite();
+
+        return site.wsAvailable('core_course_get_courses_by_field');
+    }
+
+    /**
+     * Check if get courses by field WS is available in a certain site, by site ID.
+     *
+     * @param {string} [siteId] Site ID. If not defined, current site.
+     * @return {Promise<boolean>} Promise resolved with boolean: whether get courses by field is available.
+     * @since 3.2
+     */
+    isGetCoursesByFieldAvailableInSite(siteId?: string): Promise<boolean> {
+        return this.sitesProvider.getSite(siteId).then((site) => {
+            return this.isGetCoursesByFieldAvailable(site);
+        });
     }
 
     /**
@@ -542,6 +595,10 @@ export class CoreCoursesProvider {
      * @return {Promise<any>} Promise resolved with administration options for each course.
      */
     getUserAdministrationOptions(courseIds: number[], siteId?: string): Promise<any> {
+        if (!courseIds || courseIds.length == 0) {
+            return Promise.resolve({});
+        }
+
         return this.sitesProvider.getSite(siteId).then((site) => {
             const params = {
                     courseids: courseIds
@@ -584,6 +641,10 @@ export class CoreCoursesProvider {
      * @return {Promise<any>} Promise resolved with navigation options for each course.
      */
     getUserNavigationOptions(courseIds: number[], siteId?: string): Promise<any> {
+        if (!courseIds || courseIds.length == 0) {
+            return Promise.resolve({});
+        }
+
         return this.sitesProvider.getSite(siteId).then((site) => {
             const params = {
                     courseids: courseIds
@@ -934,6 +995,29 @@ export class CoreCoursesProvider {
 
                 return Promise.reject(null);
             });
+        });
+    }
+
+    /**
+     * Set favourite property on a course.
+     *
+     * @param {number} courseId   Course ID.
+     * @param {boolean} favourite If favourite or unfavourite.
+     * @param {string} [siteId] Site ID. If not defined, use current site.
+     * @return {Promise<any>} Promise resolved when done.
+     */
+    setFavouriteCourse(courseId: number, favourite: boolean, siteId?: string): Promise<any> {
+        return this.sitesProvider.getSite(siteId).then((site) => {
+            const params: any = {
+                    courses: [
+                        {
+                            id: courseId,
+                            favourite: favourite ? 1 : 0
+                        }
+                    ]
+                };
+
+            return site.write('core_course_set_favourite_courses', params);
         });
     }
 }

@@ -18,6 +18,7 @@ import { CoreCourseModuleHandler, CoreCourseModuleHandlerData } from '@core/cour
 import { CoreCourseProvider } from '@core/course/providers/course';
 import { AddonModImscpIndexComponent } from '../components/index/index';
 import { AddonModImscpProvider } from './imscp';
+import { CoreConstants } from '@core/constants';
 
 /**
  * Handler to support IMSCP modules.
@@ -26,6 +27,18 @@ import { AddonModImscpProvider } from './imscp';
 export class AddonModImscpModuleHandler implements CoreCourseModuleHandler {
     name = 'AddonModImscp';
     modName = 'imscp';
+
+    supportedFeatures = {
+        [CoreConstants.FEATURE_MOD_ARCHETYPE]: CoreConstants.MOD_ARCHETYPE_RESOURCE,
+        [CoreConstants.FEATURE_GROUPS]: false,
+        [CoreConstants.FEATURE_GROUPINGS]: false,
+        [CoreConstants.FEATURE_MOD_INTRO]: true,
+        [CoreConstants.FEATURE_COMPLETION_TRACKS_VIEWS]: true,
+        [CoreConstants.FEATURE_GRADE_HAS_GRADE]: false,
+        [CoreConstants.FEATURE_GRADE_OUTCOMES]: false,
+        [CoreConstants.FEATURE_BACKUP_MOODLE2]: true,
+        [CoreConstants.FEATURE_SHOW_DESCRIPTION]: true
+    };
 
     constructor(private courseProvider: CoreCourseProvider, protected imscpProvider: AddonModImscpProvider) { }
 
@@ -48,12 +61,16 @@ export class AddonModImscpModuleHandler implements CoreCourseModuleHandler {
      */
     getData(module: any, courseId: number, sectionId: number): CoreCourseModuleHandlerData {
         return {
-            icon: this.courseProvider.getModuleIconSrc('imscp'),
+            icon: this.courseProvider.getModuleIconSrc(this.modName, module.modicon),
             title: module.name,
             class: 'addon-mod_imscp-handler',
             showDownloadButton: true,
-            action(event: Event, navCtrl: NavController, module: any, courseId: number, options: NavOptions): void {
-                navCtrl.push('AddonModImscpIndexPage', {module: module, courseId: courseId}, options);
+            action(event: Event, navCtrl: NavController, module: any, courseId: number, options: NavOptions, params?: any): void {
+                const pageParams = {module: module, courseId: courseId};
+                if (params) {
+                    Object.assign(pageParams, params);
+                }
+                navCtrl.push('AddonModImscpIndexPage', pageParams, options);
             }
         };
     }

@@ -10,12 +10,18 @@
         <ion-refresher-content pullingText="{{ 'core.pulltorefresh' | translate }}"></ion-refresher-content>
     </ion-refresher>
     <core-loading [hideUntil]="notesLoaded" class="core-loading-center">
+        <ion-item text-wrap *ngIf="user">
+            <ion-avatar core-user-avatar [user]="user" [courseId]="courseId" item-start [linkProfile]="false"></ion-avatar>
+            <h2>{{user.fullname}}</h2>
+        </ion-item>
 
-        <ion-select [(ngModel)]="type" (ngModelChange)="typeChanged()" interface="popover">
-            <ion-option value="site">{{ 'addon.notes.sitenotes' | translate }}</ion-option>
-            <ion-option value="course">{{ 'addon.notes.coursenotes' | translate }}</ion-option>
-            <ion-option value="personal">{{ 'addon.notes.personalnotes' | translate }}</ion-option>
-        </ion-select>
+        <div padding>
+            <ion-select [(ngModel)]="type" (ngModelChange)="typeChanged()" interface="popover" class="core-button-select">
+                <ion-option value="site">{{ 'addon.notes.sitenotes' | translate }}</ion-option>
+                <ion-option value="course">{{ 'addon.notes.coursenotes' | translate }}</ion-option>
+                <ion-option value="personal">{{ 'addon.notes.personalnotes' | translate }}</ion-option>
+            </ion-select>
+        </div>
 
         <div class="core-warning-card" icon-start *ngIf="hasOffline">
             <ion-icon name="warning"></ion-icon>
@@ -27,10 +33,8 @@
         <ion-list *ngIf="notes && notes.length > 0">
             <ion-card *ngFor="let note of notes">
                 <ion-item text-wrap>
-                    <ion-avatar item-start>
-                        <img [src]="note.userprofileimageurl || 'assets/img/user-avatar.png'" core-external-content core-user-link [userId]="note.userid" [courseId]="note.courseid" [alt]="'core.pictureof' | translate:{$a: note.userfullname}" role="presentation">
-                    </ion-avatar>
-                    <h2>{{note.userfullname}}</h2>
+                    <ion-avatar core-user-avatar [user]="note" [courseId]="courseId" item-start *ngIf="!userId"></ion-avatar>
+                    <h2 *ngIf="!userId">{{note.userfullname}}</h2>
                     <p *ngIf="!note.offline" item-end>{{note.lastmodified | coreDateDayOrTime}}</p>
                     <p *ngIf="note.offline" item-end><ion-icon name="time"></ion-icon> {{ 'core.notsent' | translate }}</p>
                 </ion-item>
@@ -39,5 +43,11 @@
                 </ion-item>
             </ion-card>
         </ion-list>
+
     </core-loading>
+    <ion-fab core-fab bottom end *ngIf="userId && notesLoaded">
+        <button ion-fab (click)="addNote($event)" [attr.aria-label]="'addon.notes.addnewnote' |translate">
+            <ion-icon name="add"></ion-icon>
+        </button>
+    </ion-fab>
 </ion-content>

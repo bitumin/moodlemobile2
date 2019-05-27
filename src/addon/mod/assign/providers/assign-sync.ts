@@ -20,8 +20,10 @@ import { CoreLoggerProvider } from '@providers/logger';
 import { CoreSitesProvider } from '@providers/sites';
 import { CoreSyncProvider } from '@providers/sync';
 import { CoreTextUtilsProvider } from '@providers/utils/text';
+import { CoreTimeUtilsProvider } from '@providers/utils/time';
 import { CoreUtilsProvider } from '@providers/utils/utils';
 import { CoreCourseProvider } from '@core/course/providers/course';
+import { CoreCourseLogHelperProvider } from '@core/course/providers/log-helper';
 import { CoreGradesHelperProvider } from '@core/grades/providers/helper';
 import { CoreSyncBaseProvider } from '@classes/base-sync';
 import { AddonModAssignProvider } from './assign';
@@ -60,9 +62,11 @@ export class AddonModAssignSyncProvider extends CoreSyncBaseProvider {
             private courseProvider: CoreCourseProvider, private eventsProvider: CoreEventsProvider,
             private assignProvider: AddonModAssignProvider, private assignOfflineProvider: AddonModAssignOfflineProvider,
             private utils: CoreUtilsProvider, private submissionDelegate: AddonModAssignSubmissionDelegate,
-            private gradesHelper: CoreGradesHelperProvider) {
+            private gradesHelper: CoreGradesHelperProvider, timeUtils: CoreTimeUtilsProvider,
+            private logHelper: CoreCourseLogHelperProvider) {
 
-        super('AddonModAssignSyncProvider', loggerProvider, sitesProvider, appProvider, syncProvider, textUtils, translate);
+        super('AddonModAssignSyncProvider', loggerProvider, sitesProvider, appProvider, syncProvider, textUtils, translate,
+                timeUtils);
 
         this.componentTranslate = courseProvider.translateModuleName('assign');
     }
@@ -200,6 +204,9 @@ export class AddonModAssignSyncProvider extends CoreSyncBaseProvider {
             return [];
         }));
 
+        // Sync offline logs.
+        promises.push(this.logHelper.syncIfNeeded(AddonModAssignProvider.COMPONENT, assignId, siteId));
+
         syncPromise = Promise.all(promises).then((results) => {
             const submissions = results[0],
                 grades = results[1];
@@ -214,7 +221,7 @@ export class AddonModAssignSyncProvider extends CoreSyncBaseProvider {
 
             courseId = submissions.length > 0 ? submissions[0].courseid : grades[0].courseid;
 
-            return this.assignProvider.getAssignmentById(courseId, assignId, siteId).then((assignData) => {
+            return this.assignProvider.getAssignmentById(courseId, assignId, false, siteId).then((assignData) => {
                 assign = assignData;
 
                 const promises = [];
@@ -268,7 +275,7 @@ export class AddonModAssignSyncProvider extends CoreSyncBaseProvider {
         let discardError,
             submission;
 
-        return this.assignProvider.getSubmissionStatus(assign.id, userId, false, true, true, siteId).then((status) => {
+        return this.assignProvider.getSubmissionStatus(assign.id, userId, undefined, false, true, true, siteId).then((status) => {
             const promises = [];
 
             submission = this.assignProvider.getSubmissionObjectFromAttempt(assign, status.lastattempt);
@@ -303,12 +310,12 @@ export class AddonModAssignSyncProvider extends CoreSyncBaseProvider {
                     }
                 }).then(() => {
                     // Submission data sent, update cached data. No need to block the user for this.
-                    this.assignProvider.getSubmissionStatus(assign.id, userId, false, true, true, siteId);
+                    this.assignProvider.getSubmissionStatus(assign.id, userId, undefined, false, true, true, siteId);
                 });
             }).catch((error) => {
                 if (error && this.utils.isWebServiceError(error)) {
                     // A WebService has thrown an error, this means it cannot be submitted. Discard the submission.
-                    discardError = error.message || error.error || error.content || error.body;
+                    discardError = this.textUtils.getErrorMessageFromError(error);
                 } else {
                     // Couldn't connect to server, reject.
                     return Promise.reject(error);
@@ -357,7 +364,7 @@ export class AddonModAssignSyncProvider extends CoreSyncBaseProvider {
         const userId = offlineData.userid;
         let discardError;
 
-        return this.assignProvider.getSubmissionStatus(assign.id, userId, false, true, true, siteId).then((status) => {
+        return this.assignProvider.getSubmissionStatus(assign.id, userId, undefined, false, true, true, siteId).then((status) => {
             const timemodified = status.feedback && (status.feedback.gradeddate || status.feedback.grade.timemodified);
 
             if (timemodified > offlineData.timemodified) {
@@ -398,11 +405,11 @@ export class AddonModAssignSyncProvider extends CoreSyncBaseProvider {
                         offlineData.plugindata, siteId).then(() => {
 
                     // Grades sent, update cached data. No need to block the user for this.
-                    this.assignProvider.getSubmissionStatus(assign.id, userId, false, true, true, siteId);
+                    this.assignProvider.getSubmissionStatus(assign.id, userId, undefined, false, true, true, siteId);
                 }).catch((error) => {
                     if (error && this.utils.isWebServiceError(error)) {
                         // The WebService has thrown an error, this means it cannot be submitted. Discard the offline data.
-                        discardError = error.message || error.error || error.content || error.body;
+                        discardError = this.textUtils.getErrorMessageFromError(error);
                     } else {
                         // Couldn't connect to server, reject.
                     return Promise.reject(error);

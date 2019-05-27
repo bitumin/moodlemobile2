@@ -14,12 +14,14 @@
 
 import { Injectable } from '@angular/core';
 import { TranslateService } from '@ngx-translate/core';
+import { CoreEventsProvider } from '@providers/events';
 import { CoreLoggerProvider } from '@providers/logger';
-import { CoreSitesProvider } from '@providers/sites';
+import { CoreSitesProvider, CoreSiteSchema } from '@providers/sites';
 import { CoreTextUtilsProvider } from '@providers/utils/text';
 import { CoreDomUtilsProvider } from '@providers/utils/dom';
 import { CoreUtilsProvider } from '@providers/utils/utils';
 import { CoreGradesProvider } from '@core/grades/providers/grades';
+import { CoreCourseLogHelperProvider } from '@core/course/providers/log-helper';
 import { CoreSiteWSPreSets } from '@classes/site';
 import { AddonModLessonOfflineProvider } from './lesson-offline';
 
@@ -112,6 +114,7 @@ export interface AddonModLessonGrade {
 @Injectable()
 export class AddonModLessonProvider {
     static COMPONENT = 'mmaModLesson';
+    static DATA_SENT_EVENT = 'addon_mod_lesson_data_sent';
 
     // This page.
     static LESSON_THISPAGE = 0;
@@ -148,23 +151,34 @@ export class AddonModLessonProvider {
     static LESSON_PAGE_CLUSTER =      30;
     static LESSON_PAGE_ENDOFCLUSTER = 31;
 
+    /**
+     * Constant used as a delimiter when parsing multianswer questions
+     */
+    static MULTIANSWER_DELIMITER = '@^#|';
+
     // Variables for database.
     static PASSWORD_TABLE = 'addon_mod_lesson_password';
-    protected tablesSchema = {
-        name: AddonModLessonProvider.PASSWORD_TABLE,
-        columns: [
+    protected siteSchema: CoreSiteSchema = {
+        name: 'AddonModLessonProvider',
+        version: 1,
+        tables: [
             {
-                name: 'lessonid',
-                type: 'INTEGER',
-                primaryKey: true
-            },
-            {
-                name: 'password',
-                type: 'TEXT'
-            },
-            {
-                name: 'timemodified',
-                type: 'INTEGER'
+                name: AddonModLessonProvider.PASSWORD_TABLE,
+                columns: [
+                    {
+                        name: 'lessonid',
+                        type: 'INTEGER',
+                        primaryKey: true
+                    },
+                    {
+                        name: 'password',
+                        type: 'TEXT'
+                    },
+                    {
+                        name: 'timemodified',
+                        type: 'INTEGER'
+                    }
+                ]
             }
         ]
     };
@@ -174,10 +188,40 @@ export class AddonModLessonProvider {
 
     constructor(logger: CoreLoggerProvider, private sitesProvider: CoreSitesProvider, private utils: CoreUtilsProvider,
             private translate: TranslateService, private textUtils: CoreTextUtilsProvider, private domUtils: CoreDomUtilsProvider,
-            private lessonOfflineProvider: AddonModLessonOfflineProvider) {
+            private lessonOfflineProvider: AddonModLessonOfflineProvider, private logHelper: CoreCourseLogHelperProvider,
+            private eventsProvider: CoreEventsProvider) {
         this.logger = logger.getInstance('AddonModLessonProvider');
 
-        this.sitesProvider.createTableFromSchema(this.tablesSchema);
+        this.sitesProvider.registerSiteSchema(this.siteSchema);
+    }
+
+    /**
+     * Add an answer and its response to a feedback string (HTML).
+     *
+     * @param {string} feedback The current feedback.
+     * @param {string} answer Student answer.
+     * @param {number} answerFormat Answer format.
+     * @param {string} response Response.
+     * @param {string} className Class to add to the response.
+     * @return {string} New feedback.
+     */
+    protected addAnswerAndResponseToFeedback(feedback: string, answer: string, answerFormat: number, response: string,
+            className: string): string {
+
+        // Add a table row containing the answer.
+        feedback += '<tr><td class="cell c0 lastcol">' + (answerFormat ? answer : this.textUtils.cleanTags(answer)) +
+                '</td></tr>';
+
+        // If the response exists, add a table row containing the response. If not, add en empty row.
+        if (response && response.trim()) {
+            feedback += '<tr><td class="cell c0 lastcol ' + className + '"><em>' +
+                this.translate.instant('addon.mod_lesson.response') + '</em>: <br/>' +
+                response + '</td></tr>';
+        } else {
+            feedback += '<tr><td class="cell c0 lastcol"></td></tr>';
+        }
+
+        return feedback;
     }
 
     /**
@@ -280,10 +324,10 @@ export class AddonModLessonProvider {
      * @param {boolean} [review] If the user wants to review just after finishing (1 hour margin).
      * @param {any} [pageIndex] Object containing all the pages indexed by ID. If not defined, it will be calculated.
      * @param {string} [siteId] Site ID. If not defined, current site.
-     * @return {Promise<{reviewMode: boolean, progress: number, ongoingScore: string}>} Promise resolved with the data.
+     * @return {Promise<{reviewmode: boolean, progress: number, ongoingscore: string}>} Promise resolved with the data.
      */
     protected calculateOfflineData(lesson: any, accessInfo?: any, password?: string, review?: boolean, pageIndex?: any,
-            siteId?: string): Promise<{reviewMode: boolean, progress: number, ongoingScore: string}> {
+            siteId?: string): Promise<{reviewmode: boolean, progress: number, ongoingscore: string}> {
 
         accessInfo = accessInfo || {};
 
@@ -308,9 +352,9 @@ export class AddonModLessonProvider {
 
         return Promise.all(promises).then(() => {
             return {
-                reviewMode: reviewMode,
+                reviewmode: reviewMode,
                 progress: progress,
-                ongoingScore: ongoingMessage
+                ongoingscore: ongoingMessage
             };
         });
     }
@@ -601,7 +645,8 @@ export class AddonModLessonProvider {
             result.userresponse = studentAnswers.join(',');
 
             // Get the answers in a set order, the id order.
-            const responses = [];
+            const studentAswersArray = [],
+                responses = [];
             let nHits = 0,
                 nCorrect = 0,
                 correctAnswerId = 0,
@@ -617,14 +662,13 @@ export class AddonModLessonProvider {
                     const answerId = studentAnswers[i];
 
                     if (answerId == answer.id) {
-                        result.studentanswer += '<br />' + answer.answer;
-                        if (this.textUtils.cleanTags(answer.response).trim()) {
-                            responses.push(answer.response);
-                        }
+                        studentAswersArray.push(answer.answer);
+                        responses.push(answer.response);
                         break;
                     }
                 }
             });
+            result.studentanswer = studentAswersArray.join(AddonModLessonProvider.MULTIANSWER_DELIMITER);
 
             // Iterate over all the possible answers.
             answers.forEach((answer) => {
@@ -664,12 +708,12 @@ export class AddonModLessonProvider {
 
             if (studentAnswers.length == nCorrect && nHits == nCorrect) {
                 result.correctanswer = true;
-                result.response = responses.join('<br />');
+                result.response = responses.join(AddonModLessonProvider.MULTIANSWER_DELIMITER);
                 result.newpageid = correctPageId;
                 result.answerid = correctAnswerId;
             } else {
                 result.correctanswer = false;
-                result.response = responses.join('<br />');
+                result.response = responses.join(AddonModLessonProvider.MULTIANSWER_DELIMITER);
                 result.newpageid = wrongPageId;
                 result.answerid = wrongAnswerId;
             }
@@ -1046,7 +1090,17 @@ export class AddonModLessonProvider {
             });
         }
 
-        return this.finishRetakeOnline(lesson.id, password, outOfTime, review, siteId);
+        return this.finishRetakeOnline(lesson.id, password, outOfTime, review, siteId).then((response) => {
+            this.eventsProvider.trigger(AddonModLessonProvider.DATA_SENT_EVENT, {
+                lessonId: lesson.id,
+                type: 'finish',
+                courseId: courseId,
+                outOfTime: outOfTime,
+                review: review
+            }, this.sitesProvider.getCurrentSiteId());
+
+            return response;
+        });
     }
 
     /**
@@ -1322,11 +1376,12 @@ export class AddonModLessonProvider {
      * @param {number} courseId Course ID.
      * @param {number} cmid Course module ID.
      * @param {boolean} [forceCache] Whether it should always return cached data.
+     * @param {boolean} [ignoreCache] Whether it should ignore cached data (it will always fail in offline or server down).
      * @param {string} [siteId] Site ID. If not defined, current site.
      * @return {Promise<any>} Promise resolved when the lesson is retrieved.
      */
-    getLesson(courseId: number, cmId: number, forceCache?: boolean, siteId?: string): Promise<any> {
-        return this.getLessonByField(courseId, 'coursemodule', cmId, forceCache, siteId);
+    getLesson(courseId: number, cmId: number, forceCache?: boolean, ignoreCache?: boolean, siteId?: string): Promise<any> {
+        return this.getLessonByField(courseId, 'coursemodule', cmId, forceCache, ignoreCache, siteId);
     }
 
     /**
@@ -1336,10 +1391,12 @@ export class AddonModLessonProvider {
      * @param {string} key Name of the property to check.
      * @param {any} value Value to search.
      * @param {boolean} [forceCache] Whether it should always return cached data.
+     * @param {boolean} [ignoreCache] Whether it should ignore cached data (it will always fail in offline or server down).
      * @param {string} [siteId] Site ID. If not defined, current site.
      * @return {Promise<any>} Promise resolved when the lesson is retrieved.
      */
-    protected getLessonByField(courseId: number, key: string, value: any, forceCache?: boolean, siteId?: string): Promise<any> {
+    protected getLessonByField(courseId: number, key: string, value: any, forceCache?: boolean, ignoreCache?: boolean,
+            siteId?: string): Promise<any> {
 
         return this.sitesProvider.getSite(siteId).then((site) => {
             const params = {
@@ -1351,6 +1408,9 @@ export class AddonModLessonProvider {
 
             if (forceCache) {
                 preSets.omitExpires = true;
+            } else if (ignoreCache) {
+                preSets.getFromCache = false;
+                preSets.emergencyCache = false;
             }
 
             return site.read('mod_lesson_get_lessons_by_courses', params, preSets).then((response) => {
@@ -1375,11 +1435,12 @@ export class AddonModLessonProvider {
      * @param {number} courseId Course ID.
      * @param {number} id Lesson ID.
      * @param {boolean} [forceCache] Whether it should always return cached data.
+     * @param {boolean} [ignoreCache] Whether it should ignore cached data (it will always fail in offline or server down).
      * @param {string} [siteId] Site ID. If not defined, current site.
      * @return {Promise<any>} Promise resolved when the lesson is retrieved.
      */
-    getLessonById(courseId: number, id: number, forceCache?: boolean, siteId?: string): Promise<any> {
-        return this.getLessonByField(courseId, 'id', id, forceCache, siteId);
+    getLessonById(courseId: number, id: number, forceCache?: boolean, ignoreCache?: boolean, siteId?: string): Promise<any> {
+        return this.getLessonByField(courseId, 'id', id, forceCache, ignoreCache, siteId);
     }
 
     /**
@@ -2302,6 +2363,41 @@ export class AddonModLessonProvider {
     }
 
     /**
+     * Get the prevent access reason to display for a certain lesson.
+     *
+     * @param {any} info Lesson access info.
+     * @param {boolean} [ignorePassword] Whether password protected reason should be ignored (user already entered the password).
+     * @param {boolean} [isReview] Whether user is reviewing a retake.
+     * @return {any} Prevent access reason.
+     */
+    getPreventAccessReason(info: any, ignorePassword?: boolean, isReview?: boolean): any {
+        let result;
+
+        if (info && info.preventaccessreasons) {
+            for (let i = 0; i < info.preventaccessreasons.length; i++) {
+                const entry = info.preventaccessreasons[i];
+
+                if (entry.reason == 'lessonopen' || entry.reason == 'lessonclosed') {
+                    // Time restrictions are the most prioritary, return it.
+                    return entry;
+                } else if (entry.reason == 'passwordprotectedlesson') {
+                    if (!ignorePassword) {
+                        // Treat password before all other reasons.
+                        result = entry;
+                    }
+                } else if (entry.reason == 'noretake' && isReview) {
+                    // Ignore noretake error when reviewing.
+                } else if (!result) {
+                    // Rest of cases, just return any of them.
+                    result = entry;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * Check if a jump is correct.
      * Based in Moodle's jumpto_is_correct.
      *
@@ -2685,7 +2781,14 @@ export class AddonModLessonProvider {
                 params.pageid = pageId;
             }
 
-            return site.write('mod_lesson_launch_attempt', params);
+            return site.write('mod_lesson_launch_attempt', params).then((response) => {
+                this.eventsProvider.trigger(AddonModLessonProvider.DATA_SENT_EVENT, {
+                    lessonId: id,
+                    type: 'launch'
+                }, this.sitesProvider.getCurrentSiteId());
+
+                return response;
+            });
         });
     }
 
@@ -2894,14 +2997,9 @@ export class AddonModLessonProvider {
                 params.password = password;
             }
 
-            return site.write('mod_lesson_view_lesson', params).then((result) => {
-                if (!result.status) {
-                    return Promise.reject(null);
-                }
-
-                return result;
-            });
+            return this.logHelper.log('mod_lesson_view_lesson', params, AddonModLessonProvider.COMPONENT, id, siteId);
         });
+
     }
 
     /**
@@ -2960,7 +3058,17 @@ export class AddonModLessonProvider {
             });
         }
 
-        return this.processPageOnline(lesson.id, pageId, data, password, review, siteId);
+        return this.processPageOnline(lesson.id, pageId, data, password, review, siteId).then((response) => {
+            this.eventsProvider.trigger(AddonModLessonProvider.DATA_SENT_EVENT, {
+                lessonId: lesson.id,
+                type: 'process',
+                courseId: courseId,
+                pageId: pageId,
+                review: review
+            }, this.sitesProvider.getCurrentSiteId());
+
+            return response;
+        });
     }
 
     /**
@@ -3143,11 +3251,31 @@ export class AddonModLessonProvider {
                     }
 
                     return subPromise.then(() => {
-                        result.feedback += '<div class="box generalbox boxaligncenter">' + pageData.page.contents + '</div>';
+                        result.feedback += '<div class="box generalbox boxaligncenter p-y-1">' + pageData.page.contents + '</div>';
                         result.feedback += '<div class="correctanswer generalbox"><em>' +
                             this.translate.instant('addon.mod_lesson.youranswer') + '</em> : ' +
-                            (result.studentanswerformat ? result.studentanswer : this.textUtils.cleanTags(result.studentanswer)) +
-                            '<div class="box ' + className + '">' + result.response + '</div></div>';
+                            '<div class="studentanswer m-t-2 m-b-2"><table class="generaltable"><tbody>';
+
+                        // Create a table containing the answers and responses.
+                        if (pageData.page.qoption) {
+                            // Multianswer allowed.
+                            const studentAnswerArray = result.studentanswer ?
+                                        result.studentanswer.split(AddonModLessonProvider.MULTIANSWER_DELIMITER) : [],
+                                responseArray = result.response ?
+                                        result.response.split(AddonModLessonProvider.MULTIANSWER_DELIMITER) : [];
+
+                            // Add answers and responses to the table.
+                            for (let i = 0; i < studentAnswerArray.length; i++) {
+                                result.feedback = this.addAnswerAndResponseToFeedback(result.feedback, studentAnswerArray[i],
+                                        result.studentanswerformat, responseArray[i], className);
+                            }
+                        } else {
+                            // Only 1 answer, add it to the table.
+                            result.feedback = this.addAnswerAndResponseToFeedback(result.feedback, result.studentanswer,
+                                    result.studentanswerformat, result.response, className);
+                        }
+
+                        result.feedback += '</tbody></table></div></div>';
                     });
                 }
             });

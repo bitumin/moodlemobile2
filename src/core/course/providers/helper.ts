@@ -29,12 +29,15 @@ import { CoreCourseOptionsDelegate, CoreCourseOptionsHandlerToDisplay } from './
 import { CoreSiteHomeProvider } from '@core/sitehome/providers/sitehome';
 import { CoreCoursesProvider } from '@core/courses/providers/courses';
 import { CoreCourseProvider } from './course';
+import { CoreCourseOfflineProvider } from './course-offline';
 import { CoreCourseModuleDelegate } from './module-delegate';
 import { CoreCourseModulePrefetchDelegate } from './module-prefetch-delegate';
 import { CoreLoginHelperProvider } from '@core/login/providers/helper';
 import { CoreConstants } from '@core/constants';
 import { CoreSite } from '@classes/site';
 import * as moment from 'moment';
+import { CoreSitePluginsProvider } from '@core/siteplugins/providers/siteplugins';
+import { CoreCourseFormatDelegate } from '@core/course/providers/format-delegate';
 
 /**
  * Prefetch info of a module.
@@ -122,7 +125,8 @@ export class CoreCourseHelperProvider {
         private courseOptionsDelegate: CoreCourseOptionsDelegate, private siteHomeProvider: CoreSiteHomeProvider,
         private eventsProvider: CoreEventsProvider, private fileHelper: CoreFileHelperProvider,
         private appProvider: CoreAppProvider, private fileProvider: CoreFileProvider, private injector: Injector,
-        private coursesProvider: CoreCoursesProvider) { }
+        private coursesProvider: CoreCoursesProvider, private courseOffline: CoreCourseOfflineProvider,
+        private courseFormatDelegate: CoreCourseFormatDelegate, private sitePluginsProvider: CoreSitePluginsProvider) { }
 
     /**
      * This function treats every module on the sections provided to load the handler data, treat completion
@@ -131,9 +135,10 @@ export class CoreCourseHelperProvider {
      * @param {any[]} sections List of sections to treat modules.
      * @param {number} courseId Course ID of the modules.
      * @param {any[]} [completionStatus] List of completion status.
+     * @param {string} [courseName] Course name. Recommended if completionStatus is supplied.
      * @return {boolean} Whether the sections have content.
      */
-    addHandlerDataForModules(sections: any[], courseId: number, completionStatus?: any): boolean {
+    addHandlerDataForModules(sections: any[], courseId: number, completionStatus?: any, courseName?: string): boolean {
         let hasContent = false;
 
         sections.forEach((section) => {
@@ -146,10 +151,22 @@ export class CoreCourseHelperProvider {
             section.modules.forEach((module) => {
                 module.handlerData = this.moduleDelegate.getModuleDataFor(module.modname, module, courseId, section.id);
 
-                if (completionStatus && typeof completionStatus[module.id] != 'undefined') {
-                    // Check if activity has completions and if it's marked.
-                    module.completionstatus = completionStatus[module.id];
-                    module.completionstatus.courseId = courseId;
+                if (module.completiondata && module.completion > 0) {
+                    module.completiondata.courseId = courseId;
+                    module.completiondata.courseName = courseName;
+                    module.completiondata.tracking = module.completion;
+                    module.completiondata.cmid = module.id;
+
+                    // Use of completionstatus is deprecated, use completiondata instead.
+                    module.completionstatus = module.completiondata;
+                } else if (completionStatus && typeof completionStatus[module.id] != 'undefined') {
+                    // Should not happen on > 3.6. Check if activity has completions and if it's marked.
+                    module.completiondata = completionStatus[module.id];
+                    module.completiondata.courseId = courseId;
+                    module.completiondata.courseName = courseName;
+
+                    // Use of completionstatus is deprecated, use completiondata instead.
+                    module.completionstatus = module.completiondata;
                 }
 
                 // Check if the module is stealth.
@@ -175,7 +192,7 @@ export class CoreCourseHelperProvider {
         }
 
         // Get the status of this section.
-        return this.prefetchDelegate.getModulesStatus(section.modules, courseId, section.id, refresh).then((result) => {
+        return this.prefetchDelegate.getModulesStatus(section.modules, courseId, section.id, refresh, true).then((result) => {
             // Check if it's being downloaded.
             const downloadId = this.getSectionDownloadId(section);
             if (this.prefetchDelegate.isBeingDownloaded(downloadId)) {
@@ -384,11 +401,15 @@ export class CoreCourseHelperProvider {
      * @return {Promise<any>} Promise resolved if the user confirms or there's no need to confirm.
      */
     confirmDownloadSizeSection(courseId: number, section?: any, sections?: any[], alwaysConfirm?: boolean): Promise<any> {
-        let sizePromise;
+        let sizePromise,
+            haveEmbeddedFiles = false;
 
         // Calculate the size of the download.
         if (section && section.id != CoreCourseProvider.ALL_SECTIONS_ID) {
             sizePromise = this.prefetchDelegate.getDownloadSize(section.modules, courseId);
+
+            // Check if the section has embedded files in the description.
+            haveEmbeddedFiles = this.domUtils.extractDownloadableFilesFromHtml(section.summary).length > 0;
         } else {
             const promises = [],
                 results = {
@@ -402,6 +423,11 @@ export class CoreCourseHelperProvider {
                         results.total = results.total && sectionSize.total;
                         results.size += sectionSize.size;
                     }));
+
+                    // Check if the section has embedded files in the description.
+                    if (!haveEmbeddedFiles && this.domUtils.extractDownloadableFilesFromHtml(s.summary).length > 0) {
+                        haveEmbeddedFiles = true;
+                    }
                 }
             });
 
@@ -411,6 +437,10 @@ export class CoreCourseHelperProvider {
         }
 
         return sizePromise.then((size) => {
+            if (haveEmbeddedFiles) {
+                size.total = false;
+            }
+
             // Show confirm modal if needed.
             return this.domUtils.confirmDownloadSize(size, undefined, undefined, undefined, undefined, alwaysConfirm);
         });
@@ -498,7 +528,7 @@ export class CoreCourseHelperProvider {
         // Make sure that module contents are loaded.
         return promise.then(() => {
             if (!files || !files.length) {
-                return Promise.reject(null);
+                return Promise.reject(this.utils.createFakeWSError('core.filenotfound', true));
             }
 
             return this.sitesProvider.getSite(siteId);
@@ -613,7 +643,7 @@ export class CoreCourseHelperProvider {
                 return this.filepoolProvider.getPackageStatus(siteId, component, componentId).then((status) => {
                     result.status = status;
 
-                    const isWifi = !this.appProvider.isNetworkAccessLimited(),
+                    const isWifi = this.appProvider.isWifi(),
                         isOnline = this.appProvider.isOnline();
 
                     if (status === CoreConstants.DOWNLOADED) {
@@ -642,7 +672,7 @@ export class CoreCourseHelperProvider {
                             });
                         }, () => {
                             // Start the download if in wifi, but return the URL right away so the file is opened.
-                            if (isWifi && isOnline) {
+                            if (isWifi) {
                                 this.downloadModule(module, courseId, component, componentId, files, siteId);
                             }
 
@@ -715,6 +745,7 @@ export class CoreCourseHelperProvider {
         return this.getModulePrefetchInfo(module, courseId, invalidateCache, component).then((moduleInfo) => {
             instance.size = moduleInfo.size > 0 ? moduleInfo.sizeReadable : 0;
             instance.prefetchStatusIcon = moduleInfo.statusIcon;
+            instance.prefetchStatus = moduleInfo.status;
 
             if (moduleInfo.status != CoreConstants.NOT_DOWNLOADABLE) {
                 // Module is downloadable, get the text to display to prefetch.
@@ -733,6 +764,150 @@ export class CoreCourseHelperProvider {
                     }
                 }, this.sitesProvider.getCurrentSiteId());
             }
+        });
+    }
+
+    /**
+     * Get a course. It will first check the user courses, and fallback to another WS if not enrolled.
+     *
+     * @param {number} courseId Course ID.
+     * @param {string} [siteId] Site ID. If not defined, current site.
+     * @return {Promise<{enrolled: boolean, course: any}>} Promise resolved with the course.
+     */
+    getCourse(courseId: number, siteId?: string): Promise<{enrolled: boolean, course: any}> {
+        siteId = siteId || this.sitesProvider.getCurrentSiteId();
+
+        // Try with enrolled courses first.
+        return this.coursesProvider.getUserCourse(courseId, false, siteId).then((course) => {
+            return { enrolled: true, course: course };
+        }).catch(() => {
+            // Not enrolled or an error happened. Try to use another WebService.
+            return this.coursesProvider.isGetCoursesByFieldAvailableInSite(siteId).then((available) => {
+                if (available) {
+                    return this.coursesProvider.getCourseByField('id', courseId, siteId);
+                } else {
+                    return this.coursesProvider.getCourse(courseId, siteId);
+                }
+            }).then((course) => {
+                return { enrolled: false, course: course };
+            });
+        });
+    }
+
+    /**
+     * Check if the course has a block with that name.
+     *
+     * @param {number} courseId Course ID.
+     * @param {string} name     Block name to search.
+     * @param {string} [siteId] Site ID. If not defined, current site.
+     * @return {Promise<boolean>} Promise resolved with true if the block exists or false otherwise.
+     * @since 3.3
+     */
+    hasABlockNamed(courseId: number, name: string, siteId?: string): Promise<boolean> {
+        return this.courseProvider.getCourseBlocks(courseId, siteId).then((blocks) => {
+            return blocks.some((block) => {
+                return block.name == name;
+            });
+        }).catch(() => {
+            return false;
+        });
+    }
+
+    /**
+     * Initialize the prefetch icon for selected courses.
+     *
+     * @param  {any[]}        courses  Courses array to get info from.
+     * @param  {any}          prefetch Prefetch information.
+     * @param  {number}       [minCourses=2] Min course to show icon.
+     * @return {Promise<any>}          Resolved with the prefetch information updated when done.
+     */
+    initPrefetchCoursesIcons(courses: any[], prefetch: any, minCourses: number = 2): Promise<any> {
+        if (!courses || courses.length < minCourses) {
+            // Not enough courses.
+            prefetch.icon = '';
+
+            return Promise.resolve(prefetch);
+        }
+
+        return this.determineCoursesStatus(courses).then((status) => {
+            let icon = this.getCourseStatusIconAndTitleFromStatus(status).icon;
+            if (icon == 'spinner') {
+                // It seems all courses are being downloaded, show a download button instead.
+                icon = 'cloud-download';
+            }
+            prefetch.icon = icon;
+
+            return prefetch;
+        });
+    }
+
+    /**
+     * Load offline completion into a list of sections.
+     * This should be used in 3.6 sites or higher, where the course contents already include the completion.
+     *
+     * @param {number} courseId The course to get the completion.
+     * @param {any[]} sections List of sections of the course.
+     * @param {string} [siteId] Site ID. If not defined, current site.
+     * @return {Promise<any>} Promise resolved when done.
+     */
+    loadOfflineCompletion(courseId: number, sections: any[], siteId?: string): Promise<any> {
+        return this.courseOffline.getCourseManualCompletions(courseId, siteId).then((offlineCompletions) => {
+            if (!offlineCompletions || !offlineCompletions.length) {
+                // No offline completion.
+                return;
+            }
+
+            const totalOffline = offlineCompletions.length;
+            let loaded = 0;
+
+            offlineCompletions = this.utils.arrayToObject(offlineCompletions, 'cmid');
+
+            // Load the offline data in the modules.
+            for (let i = 0; i < sections.length; i++) {
+                const section = sections[i];
+                if (!section.modules || !section.modules.length) {
+                    // Section has no modules, ignore it.
+                    continue;
+                }
+
+                for (let j = 0; j < section.modules.length; j++) {
+                    const module = section.modules[j],
+                        offlineCompletion = offlineCompletions[module.id];
+
+                    if (offlineCompletion && typeof module.completiondata != 'undefined' &&
+                            offlineCompletion.timecompleted >= module.completiondata.timecompleted * 1000) {
+                        // The module has offline completion. Load it.
+                        module.completiondata.state = offlineCompletion.completed;
+                        module.completiondata.offline = true;
+
+                        // If all completions have been loaded, stop.
+                        loaded++;
+                        if (loaded == totalOffline) {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Prefetch all the courses in the array.
+     *
+     * @param  {any[]}        courses  Courses array to prefetch.
+     * @param  {any}          prefetch Prefetch information to be updated.
+     * @return {Promise<any>} Promise resolved when done.
+     */
+    prefetchCourses(courses: any[], prefetch: any): Promise<any> {
+        prefetch.icon = 'spinner';
+        prefetch.badge = '';
+
+        return this.confirmAndPrefetchCourses(courses, (progress) => {
+            prefetch.badge = progress.count + ' / ' + progress.total;
+        }).then(() => {
+            prefetch.icon = 'refresh';
+        }).finally(() => {
+            prefetch.badge = '';
         });
     }
 
@@ -893,9 +1068,11 @@ export class CoreCourseHelperProvider {
      * @param {number} [sectionId] Section the module belongs to. If not defined we'll try to retrieve it from the site.
      * @param {string} [modName] If set, the app will retrieve all modules of this type with a single WS call. This reduces the
      *                           number of WS calls, but it isn't recommended for modules that can return a lot of contents.
+     * @param {any} [modParams] Params to pass to the module
      * @return {Promise<void>} Promise resolved when done.
      */
-    navigateToModule(moduleId: number, siteId?: string, courseId?: number, sectionId?: number, modName?: string): Promise<void> {
+    navigateToModule(moduleId: number, siteId?: string, courseId?: number, sectionId?: number, modName?: string, modParams?: any)
+            : Promise<void> {
         siteId = siteId || this.sitesProvider.getCurrentSiteId();
 
         const modal = this.domUtils.showModalLoading();
@@ -934,7 +1111,8 @@ export class CoreCourseHelperProvider {
             const params = {
                 course: { id: courseId },
                 module: module,
-                sectionId: sectionId
+                sectionId: sectionId,
+                modParams: modParams
             };
 
             module.handlerData = this.moduleDelegate.getModuleDataFor(module.modname, module, courseId, sectionId);
@@ -961,15 +1139,16 @@ export class CoreCourseHelperProvider {
      * @param {any} module The module to open.
      * @param {number} courseId The course ID of the module.
      * @param {number} [sectionId] The section ID of the module.
+     * @param {any} [modParams] Params to pass to the module
      * @param {boolean} True if module can be opened, false otherwise.
      */
-    openModule(navCtrl: NavController, module: any, courseId: number, sectionId?: number): boolean {
+    openModule(navCtrl: NavController, module: any, courseId: number, sectionId?: number, modParams?: any): boolean {
         if (!module.handlerData) {
             module.handlerData = this.moduleDelegate.getModuleDataFor(module.modname, module, courseId, sectionId);
         }
 
         if (module.handlerData && module.handlerData.action) {
-            module.handlerData.action(new Event('click'), navCtrl, module, courseId, { animate: false });
+            module.handlerData.action(new Event('click'), navCtrl, module, courseId, { animate: false }, modParams);
 
             return true;
         }
@@ -1021,7 +1200,13 @@ export class CoreCourseHelperProvider {
             if (this.coursesProvider.isGetCoursesByFieldAvailable()) {
                 promises.push(this.coursesProvider.getCoursesByField('id', course.id));
             }
-            promises.push(this.courseProvider.getActivitiesCompletionStatus(course.id));
+
+            const sectionWithModules = sections.find((section) => {
+                    return section.modules && section.modules.length > 0;
+            });
+            if (!sectionWithModules || typeof sectionWithModules.modules[0].completion == 'undefined') {
+                promises.push(this.courseProvider.getActivitiesCompletionStatus(course.id));
+            }
 
             return this.utils.allPromises(promises);
         }).then(() => {
@@ -1076,7 +1261,7 @@ export class CoreCourseHelperProvider {
     prefetchSection(section: any, courseId: number, sections?: any[]): Promise<any> {
         if (section.id != CoreCourseProvider.ALL_SECTIONS_ID) {
             // Download only this section.
-            return this.prefetchSingleSectionIfNeeded(section, courseId).then(() => {
+            return this.prefetchSingleSectionIfNeeded(section, courseId).finally(() => {
                 // Calculate the status of the section that finished.
                 return this.calculateSectionStatus(section, courseId);
             });
@@ -1088,7 +1273,7 @@ export class CoreCourseHelperProvider {
             section.isDownloading = true;
             sections.forEach((section) => {
                 if (section.id != CoreCourseProvider.ALL_SECTIONS_ID) {
-                    promises.push(this.prefetchSingleSectionIfNeeded(section, courseId).then(() => {
+                    promises.push(this.prefetchSingleSectionIfNeeded(section, courseId).finally(() => {
                         // Calculate the status of the section that finished.
                         return this.calculateSectionStatus(section, courseId).then((result) => {
                             // Calculate "All sections" status.
@@ -1128,10 +1313,12 @@ export class CoreCourseHelperProvider {
             return Promise.resolve();
         }
 
+        const promises = [];
+
         section.isDownloading = true;
 
         // Validate the section needs to be downloaded and calculate amount of modules that need to be downloaded.
-        return this.prefetchDelegate.getModulesStatus(section.modules, courseId, section.id).then((result) => {
+        promises.push(this.prefetchDelegate.getModulesStatus(section.modules, courseId, section.id).then((result) => {
             if (result.status == CoreConstants.DOWNLOADED || result.status == CoreConstants.NOT_DOWNLOADABLE) {
                 // Section is downloaded or not downloadable, nothing to do.
                 return;
@@ -1142,7 +1329,18 @@ export class CoreCourseHelperProvider {
             section.isDownloading = false;
 
             return Promise.reject(error);
-        });
+        }));
+
+        // Download the files in the section description.
+        const introFiles = this.domUtils.extractDownloadableFilesFromHtmlAsFakeFileObjects(section.summary),
+            siteId = this.sitesProvider.getCurrentSiteId();
+
+        promises.push(this.filepoolProvider.addFilesToQueue(siteId, introFiles, CoreCourseProvider.COMPONENT, courseId)
+                .catch(() => {
+            // Ignore errors.
+        }));
+
+        return Promise.all(promises);
     }
 
     /**
@@ -1191,5 +1389,43 @@ export class CoreCourseHelperProvider {
 
         return (typeof section.availabilityinfo != 'undefined' && section.availabilityinfo != '') ||
             section.summary != '' || (section.modules && section.modules.length > 0);
+    }
+
+    /**
+     * Wait for any course format plugin to load, and open the course page.
+     *
+     * If the plugin's promise is resolved, the course page will be opened.  If it is rejected, they will see an error.
+     * If the promise for the plugin is still in progress when the user tries to open the course, a loader
+     * will be displayed until it is complete, before the course page is opened.  If the promise is already complete,
+     * they will see the result immediately.
+     *
+     * @param {NavController} navCtrl The nav controller to use.
+     * @param {any} course Course to open
+     */
+    openCourse(navCtrl: NavController, course: any): void {
+        if (this.sitePluginsProvider.sitePluginPromiseExists('format_' + course.format)) {
+            // This course uses a custom format plugin, wait for the format plugin to finish loading.
+            const loading = this.domUtils.showModalLoading();
+            this.sitePluginsProvider.sitePluginLoaded('format_' + course.format).then(() => {
+                // The format loaded successfully, but the handlers wont be registered until all site plugins have loaded.
+                if (this.sitePluginsProvider.sitePluginsFinishedLoading) {
+                    loading.dismiss();
+                    this.courseFormatDelegate.openCourse(navCtrl, course);
+                } else {
+                    const observer = this.eventsProvider.on(CoreEventsProvider.SITE_PLUGINS_LOADED, () => {
+                        loading.dismiss();
+                        this.courseFormatDelegate.openCourse(navCtrl, course);
+                        observer && observer.off();
+                    });
+                }
+            }).catch(() => {
+                // The site plugin failed to load. The user needs to restart the app to try loading it again.
+                loading.dismiss();
+                this.domUtils.showErrorModal('core.courses.errorloadplugins', true);
+            });
+        } else {
+            // No custom format plugin. We don't need to wait for anything.
+            this.courseFormatDelegate.openCourse(navCtrl, course);
+        }
     }
 }

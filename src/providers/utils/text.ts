@@ -13,7 +13,8 @@
 // limitations under the License.
 
 import { Injectable } from '@angular/core';
-import { ModalController } from 'ionic-angular';
+import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
+import { ModalController, Platform } from 'ionic-angular';
 import { TranslateService } from '@ngx-translate/core';
 import { CoreLangProvider } from '../lang';
 
@@ -66,11 +67,24 @@ export class CoreTextUtilsProvider {
         {old: /_mmaModUrl/g, new: '_AddonModUrl'},
         {old: /_mmaModWiki/g, new: '_AddonModWiki'},
         {old: /_mmaModWorkshop/g, new: '_AddonModWorkshop'},
+        {old: /remoteAddOn_/g, new: 'sitePlugin_'},
     ];
 
     protected template = document.createElement('template'); // A template element to convert HTML to element.
 
-    constructor(private translate: TranslateService, private langProvider: CoreLangProvider, private modalCtrl: ModalController) { }
+    constructor(private translate: TranslateService, private langProvider: CoreLangProvider, private modalCtrl: ModalController,
+            private sanitizer: DomSanitizer, private platform: Platform) { }
+
+    /**
+     * Given an address as a string, return a URL to open the address in maps.
+     *
+     * @param {string} address The address.
+     * @return {SafeUrl} URL to view the address.
+     */
+    buildAddressURL(address: string): SafeUrl {
+        return this.sanitizer.bypassSecurityTrustUrl((this.platform.is('android') ? 'geo:0,0?q=' : 'http://maps.google.com?q=') +
+                encodeURIComponent(address));
+    }
 
     /**
      * Given a list of sentences, build a message with all of them wrapped in <p>.
@@ -200,10 +214,20 @@ export class CoreTextUtilsProvider {
         if (!text || typeof text != 'string') {
             return 0;
         }
+        const blockTags = ['address', 'article', 'aside', 'blockquote', 'br', ' details', 'dialog', 'dd', 'div', 'dl', 'dt',
+            'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup', 'hr',
+            'li', 'main', 'nav', 'ol', 'p', 'pre', 'section', 'table', 'ul'];
 
         // Clean HTML scripts and tags.
         text = text.replace(/<script[^>]*>([\S\s]*?)<\/script>/gmi, '');
-        text = text.replace(/<\/?(?!\!)[^>]*>/gi, '');
+        // Replace block tags by space to get word count aware of line break and remove inline tags.
+        text = text.replace(/<(\/[ ]*)?([a-zA-Z0-9]+)[^>]*>/gi, (str, p1, match) => {
+            if (blockTags.indexOf(match) >= 0) {
+                return ' ';
+            }
+
+            return '';
+        });
         // Decode HTML entities.
         text = this.decodeHTMLEntities(text);
         // Replace underscores (which are classed as word characters) with spaces.
@@ -231,7 +255,7 @@ export class CoreTextUtilsProvider {
             .replace(/&lt;/g, '<')
             .replace(/&gt;/g, '>')
             .replace(/&quot;/g, '"')
-            .replace(/&#039;/g, '')
+            .replace(/&#039;/g, '\'')
             .replace(/&nbsp;/g, ' ');
     }
 
@@ -388,6 +412,20 @@ export class CoreTextUtilsProvider {
     }
 
     /**
+     * Get the error message from an error object.
+     *
+     * @param {any} error Error object.
+     * @return {string} Error message, undefined if not found.
+     */
+    getErrorMessageFromError(error: any): string {
+        if (typeof error == 'string') {
+            return error;
+        }
+
+        return error && (error.message || error.error || error.content || error.body);
+    }
+
+    /**
      * Get the pluginfile URL to replace @@PLUGINFILE@@ wildcards.
      *
      * @param {any[]} files Files to extract the URL from. They need to have the URL in a 'url' or 'fileurl' attribute.
@@ -412,6 +450,23 @@ export class CoreTextUtilsProvider {
      */
     hasHTMLTags(text: string): boolean {
         return /<[a-z][\s\S]*>/i.test(text);
+    }
+
+    /**
+     * Check if HTML content is blank.
+     *
+     * @param {string} content HTML content.
+     * @return {boolean} True if the string does not contain actual content: text, images, etc.
+     */
+    htmlIsBlank(content: string): boolean {
+        if (!content) {
+            return true;
+        }
+
+        const div = document.createElement('div');
+        div.innerHTML = content;
+
+        return div.textContent === '' && div.querySelector('img, object, hr') === null;
     }
 
     /**

@@ -18,6 +18,7 @@ import { CoreEventsProvider } from '@providers/events';
 import { CoreSitesProvider } from '@providers/sites';
 import { CoreDomUtilsProvider } from '@providers/utils/dom';
 import { CoreCourseHelperProvider } from '../../providers/helper';
+import { CoreCourseProvider } from '../../providers/course';
 import { CoreCourseModuleHandlerButton } from '../../providers/module-delegate';
 import { CoreCourseModulePrefetchDelegate, CoreCourseModulePrefetchHandler } from '../../providers/module-prefetch-delegate';
 import { CoreConstants } from '../../../constants';
@@ -36,6 +37,7 @@ import { CoreConstants } from '../../../constants';
 export class CoreCourseModuleComponent implements OnInit, OnDestroy {
     @Input() module: any; // The module to render.
     @Input() courseId: number; // The course the module belongs to.
+    @Input() section: any; // The section the module belongs to.
     @Input('downloadEnabled') set enabled(value: boolean) {
         this.downloadEnabled = value;
 
@@ -48,7 +50,7 @@ export class CoreCourseModuleComponent implements OnInit, OnDestroy {
             this.prefetchDelegate.getModuleStatus(this.module, this.courseId).then(this.showStatus.bind(this));
         }
     }
-    @Output() completionChanged?: EventEmitter<void>; // Will emit an event when the module completion changes.
+    @Output() completionChanged?: EventEmitter<any>; // Will emit an event when the module completion changes.
 
     showDownload: boolean; // Whether to display the download button.
     showRefresh: boolean; // Whether to display the refresh button.
@@ -62,7 +64,8 @@ export class CoreCourseModuleComponent implements OnInit, OnDestroy {
 
     constructor(@Optional() protected navCtrl: NavController, protected prefetchDelegate: CoreCourseModulePrefetchDelegate,
             protected domUtils: CoreDomUtilsProvider, protected courseHelper: CoreCourseHelperProvider,
-            protected eventsProvider: CoreEventsProvider, protected sitesProvider: CoreSitesProvider) {
+            protected eventsProvider: CoreEventsProvider, protected sitesProvider: CoreSitesProvider,
+            protected courseProvider: CoreCourseProvider) {
         this.completionChanged = new EventEmitter();
     }
 
@@ -93,6 +96,11 @@ export class CoreCourseModuleComponent implements OnInit, OnDestroy {
                 }
             }, this.sitesProvider.getCurrentSiteId());
         }
+
+        this.module.handlerData.a11yTitle = typeof this.module.handlerData.a11yTitle != 'undefined' ?
+            this.module.handlerData.a11yTitle : this.module.handlerData.title;
+
+        this.module.modnametranslated = this.courseProvider.translateModuleName(this.module.modname) || '';
     }
 
     /**

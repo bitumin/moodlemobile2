@@ -110,8 +110,13 @@ export class CoreLoginReconnectPage {
 
     /**
      * Tries to authenticate the user.
+     *
+     * @param {Event} e Event.
      */
-    login(): void {
+    login(e: Event): void {
+        e.preventDefault();
+        e.stopPropagation();
+
         this.appProvider.closeKeyboard();
 
         // Get input data.
@@ -141,12 +146,8 @@ export class CoreLoginReconnectPage {
                     // Reset fields so the data is not in the view anymore.
                     this.credForm.controls['password'].reset();
 
-                    if (this.pageName) {
-                        // Page defined, go to that page instead of site initial page.
-                        return this.navCtrl.setRoot(this.pageName, this.pageParams);
-                    } else {
-                        return this.loginHelper.goToSiteInitialPage();
-                    }
+                    // Go to the site initial page.
+                    return this.loginHelper.goToSiteInitialPage(this.navCtrl, this.pageName, this.pageParams);
                 }).catch((error) => {
                     // Error, go back to login page.
                     this.domUtils.showErrorModalDefault(error, 'core.login.errorupdatesite', true);
@@ -154,7 +155,7 @@ export class CoreLoginReconnectPage {
                 });
             });
         }).catch((error) => {
-            this.loginHelper.treatUserTokenError(siteUrl, error);
+            this.loginHelper.treatUserTokenError(siteUrl, error, username, password);
         }).finally(() => {
             modal.dismiss();
         });

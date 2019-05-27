@@ -14,23 +14,27 @@
 
 import { Injectable } from '@angular/core';
 import { CoreLoggerProvider } from '@providers/logger';
-import { CoreSyncBaseProvider } from '@classes/base-sync';
 import { CoreSitesProvider } from '@providers/sites';
 import { CoreAppProvider } from '@providers/app';
 import { CoreUtilsProvider } from '@providers/utils/utils';
 import { CoreTextUtilsProvider } from '@providers/utils/text';
+import { CoreTimeUtilsProvider } from '@providers/utils/time';
 import { AddonModChoiceOfflineProvider } from './offline';
 import { AddonModChoiceProvider } from './choice';
 import { CoreEventsProvider } from '@providers/events';
 import { TranslateService } from '@ngx-translate/core';
 import { CoreCourseProvider } from '@core/course/providers/course';
+import { CoreCourseLogHelperProvider } from '@core/course/providers/log-helper';
+import { CoreCourseModulePrefetchDelegate } from '@core/course/providers/module-prefetch-delegate';
+import { CoreCourseActivitySyncBaseProvider } from '@core/course/classes/activity-sync';
 import { CoreSyncProvider } from '@providers/sync';
+import { AddonModChoicePrefetchHandler } from './prefetch-handler';
 
 /**
  * Service to sync choices.
  */
 @Injectable()
-export class AddonModChoiceSyncProvider extends CoreSyncBaseProvider {
+export class AddonModChoiceSyncProvider extends CoreCourseActivitySyncBaseProvider {
 
     static AUTO_SYNCED = 'addon_mod_choice_autom_synced';
     protected componentTranslate: string;
@@ -39,8 +43,13 @@ export class AddonModChoiceSyncProvider extends CoreSyncBaseProvider {
             protected appProvider: CoreAppProvider, private choiceOffline: AddonModChoiceOfflineProvider,
             private eventsProvider: CoreEventsProvider,  private choiceProvider: AddonModChoiceProvider,
             translate: TranslateService, private utils: CoreUtilsProvider, protected textUtils: CoreTextUtilsProvider,
-            courseProvider: CoreCourseProvider, syncProvider: CoreSyncProvider) {
-        super('AddonModChoiceSyncProvider', loggerProvider, sitesProvider, appProvider, syncProvider, textUtils, translate);
+            private courseProvider: CoreCourseProvider, syncProvider: CoreSyncProvider, timeUtils: CoreTimeUtilsProvider,
+            private logHelper: CoreCourseLogHelperProvider, prefetchHandler: AddonModChoicePrefetchHandler,
+            prefetchDelegate: CoreCourseModulePrefetchDelegate) {
+
+        super('AddonModChoiceSyncProvider', loggerProvider, sitesProvider, appProvider, syncProvider, textUtils, translate,
+                timeUtils, prefetchDelegate, prefetchHandler);
+
         this.componentTranslate = courseProvider.translateModuleName('choice');
     }
 
@@ -134,10 +143,14 @@ export class AddonModChoiceSyncProvider extends CoreSyncBaseProvider {
             updated: false
         };
 
-        // Get offline responses to be sent.
-        const syncPromise = this.choiceOffline.getResponse(choiceId, siteId, userId).catch(() => {
-            // No offline data found, return empty object.
-            return {};
+        // Sync offline logs.
+        const syncPromise = this.logHelper.syncIfNeeded(AddonModChoiceProvider.COMPONENT, choiceId, siteId).catch(() => {
+            // Ignore errors.
+        }).then(() => {
+            return this.choiceOffline.getResponse(choiceId, siteId, userId).catch(() => {
+                // No offline data found, return empty object.
+                return {};
+            });
         }).then((data) => {
             if (!data.choiceid) {
                 // Nothing to sync.
@@ -176,7 +189,7 @@ export class AddonModChoiceSyncProvider extends CoreSyncBaseProvider {
                         result.warnings.push(this.translate.instant('core.warningofflinedatadeleted', {
                             component: this.componentTranslate,
                             name: data.name,
-                            error: error.error
+                            error: this.textUtils.getErrorMessageFromError(error)
                         }));
                     });
                 }
@@ -186,15 +199,9 @@ export class AddonModChoiceSyncProvider extends CoreSyncBaseProvider {
             });
         }).then(() => {
             if (courseId) {
-                const promises = [
-                    this.choiceProvider.invalidateChoiceData(courseId),
-                    choiceId ? this.choiceProvider.invalidateOptions(choiceId) : Promise.resolve(),
-                    choiceId ? this.choiceProvider.invalidateResults(choiceId) : Promise.resolve(),
-                ];
-
-                // Data has been sent to server, update choice data.
-                return Promise.all(promises).then(() => {
-                    return this.choiceProvider.getChoiceById(courseId, choiceId, siteId);
+                // Data has been sent to server, prefetch choice if needed.
+                return this.courseProvider.getModuleBasicInfoByInstance(choiceId, 'choice', siteId).then((module) => {
+                    return this.prefetchAfterUpdate(module, courseId, undefined, siteId);
                 }).catch(() => {
                     // Ignore errors.
                 });

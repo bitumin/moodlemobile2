@@ -22,7 +22,9 @@ import { CoreEventsProvider } from '@providers/events';
 import { CoreSitesProvider } from '@providers/sites';
 import { CoreSyncProvider } from '@providers/sync';
 import { CoreTextUtilsProvider } from '@providers/utils/text';
+import { CoreTimeUtilsProvider } from '@providers/utils/time';
 import { CoreUtilsProvider } from '@providers/utils/utils';
+import { CoreCourseLogHelperProvider } from '@core/course/providers/log-helper';
 import { AddonModWorkshopProvider } from './workshop';
 import { AddonModWorkshopHelperProvider } from './helper';
 import { AddonModWorkshopOfflineProvider } from './offline';
@@ -46,12 +48,15 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
             sitesProvider: CoreSitesProvider,
             syncProvider: CoreSyncProvider,
             textUtils: CoreTextUtilsProvider,
+            timeUtils: CoreTimeUtilsProvider,
             private utils: CoreUtilsProvider,
             private workshopProvider: AddonModWorkshopProvider,
             private workshopHelper: AddonModWorkshopHelperProvider,
-            private workshopOffline: AddonModWorkshopOfflineProvider) {
+            private workshopOffline: AddonModWorkshopOfflineProvider,
+            private logHelper: CoreCourseLogHelperProvider) {
 
-        super('AddonModWorkshopSyncProvider', loggerProvider, sitesProvider, appProvider, syncProvider, textUtils, translate);
+        super('AddonModWorkshopSyncProvider', loggerProvider, sitesProvider, appProvider, syncProvider, textUtils, translate,
+                timeUtils);
 
         this.componentTranslate = courseProvider.translateModuleName('workshop');
     }
@@ -168,6 +173,9 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
             // No offline data found, return empty array.
             return [];
         }));
+
+        // Sync offline logs.
+        syncPromises.push(this.logHelper.syncIfNeeded(AddonModWorkshopProvider.COMPONENT, workshopId, siteId));
 
         const result = {
             warnings: [],
@@ -318,6 +326,10 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
                     }
 
                     return fileProm.then((attachmentsId) => {
+                        if (workshop.submissiontypefile == AddonModWorkshopProvider.SUBMISSION_TYPE_DISABLED) {
+                            attachmentsId = null;
+                        }
+
                         // Perform the action.
                         switch (action.action) {
                             case 'add':
@@ -336,7 +348,7 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
                     }).catch((error) => {
                         if (error && this.utils.isWebServiceError(error)) {
                             // The WebService has thrown an error, this means it cannot be performed. Discard.
-                            discardError = error.message || error.error;
+                            discardError = this.textUtils.getErrorMessageFromError(error);
                         } else {
                             // Couldn't connect to server, reject.
                             return Promise.reject(error);
@@ -346,7 +358,15 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
                         result.updated = true;
 
                         return this.workshopOffline.deleteSubmissionAction(action.workshopid, action.submissionid, action.action,
-                                siteId);
+                                siteId).then(() => {
+                            // Delete stored files.
+                            if (action.action == 'add' || action.action == 'update') {
+                                const editing = action.action == 'update';
+
+                                return this.workshopHelper.deleteSubmissionStoredFiles(action.workshopid,
+                                        action.submissionid, editing, siteId);
+                            }
+                        });
                     });
                 });
             });
@@ -417,7 +437,7 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
             }).catch((error) => {
                 if (error && this.utils.isWebServiceError(error)) {
                     // The WebService has thrown an error, this means it cannot be performed. Discard.
-                    discardError = error.message || error.error;
+                    discardError = this.textUtils.getErrorMessageFromError(error);
                 } else {
                     // Couldn't connect to server, reject.
                     return Promise.reject(error);
@@ -426,7 +446,9 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
                 // Delete the offline data.
                 result.updated = true;
 
-                return this.workshopOffline.deleteAssessment(workshop.id, assessmentId, siteId);
+                return this.workshopOffline.deleteAssessment(workshop.id, assessmentId, siteId).then(() => {
+                    this.workshopHelper.deleteAssessmentStoredFiles(workshop.id, assessmentId, siteId);
+                });
             });
         }).then(() => {
             if (discardError) {
@@ -476,10 +498,10 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
                 evaluate.gradeover, siteId).catch((error) => {
                 if (error && this.utils.isWebServiceError(error)) {
                     // The WebService has thrown an error, this means it cannot be performed. Discard.
-                    discardError = error.message || error.error;
+                    discardError = this.textUtils.getErrorMessageFromError(error);
                 } else {
                     // Couldn't connect to server, reject.
-                    return Promise.reject(error && error.error);
+                    return Promise.reject(error);
                 }
             }).then(() => {
                 // Delete the offline data.
@@ -535,10 +557,10 @@ export class AddonModWorkshopSyncProvider extends CoreSyncBaseProvider {
                 evaluate.gradinggradeover, siteId).catch((error) => {
                 if (error && this.utils.isWebServiceError(error)) {
                     // The WebService has thrown an error, this means it cannot be performed. Discard.
-                    discardError = error.message || error.error;
+                    discardError = this.textUtils.getErrorMessageFromError(error);
                 } else {
                     // Couldn't connect to server, reject.
-                    return Promise.reject(error && error.error);
+                    return Promise.reject(error);
                 }
             }).then(() => {
                 // Delete the offline data.

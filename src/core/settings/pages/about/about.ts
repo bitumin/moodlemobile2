@@ -22,6 +22,7 @@ import { CoreLangProvider } from '@providers/lang';
 import { CoreLocalNotificationsProvider } from '@providers/local-notifications';
 import { CoreSitesProvider } from '@providers/sites';
 import { CoreConfigConstants } from '../../../../configconstants';
+import { AddonPushNotificationsProvider } from '@addon/pushnotifications/providers/pushnotifications';
 
 /**
  * Page that displays the about settings.
@@ -37,6 +38,7 @@ export class CoreSettingsAboutPage {
     versionName: string;
     versionCode: number;
     compilationTime: number;
+    lastCommit: string;
     privacyPolicy: string;
     navigator: Navigator;
     locationHref: string;
@@ -52,10 +54,11 @@ export class CoreSettingsAboutPage {
     fsClickable: boolean;
     storageType: string;
     localNotifAvailable: string;
+    pushId: string;
 
     constructor(platform: Platform, device: Device, appProvider: CoreAppProvider, fileProvider: CoreFileProvider,
             initDelegate: CoreInitDelegate, langProvider: CoreLangProvider, sitesProvider: CoreSitesProvider,
-            localNotificationsProvider: CoreLocalNotificationsProvider) {
+            localNotificationsProvider: CoreLocalNotificationsProvider, pushNotificationsProvider: AddonPushNotificationsProvider) {
 
         const currentSite = sitesProvider.getCurrentSite();
 
@@ -63,10 +66,11 @@ export class CoreSettingsAboutPage {
         this.versionName = CoreConfigConstants.versionname;
         this.versionCode = CoreConfigConstants.versioncode;
         this.compilationTime = CoreConfigConstants.compilationtime;
+        this.lastCommit = CoreConfigConstants.lastcommit;
 
         // Calculate the privacy policy to use.
-        this.privacyPolicy = currentSite.getStoredConfig('tool_mobile_apppolicy') || currentSite.getStoredConfig('sitepolicy') ||
-                CoreConfigConstants.privacypolicy;
+        this.privacyPolicy = (currentSite && (currentSite.getStoredConfig('tool_mobile_apppolicy') ||
+                currentSite.getStoredConfig('sitepolicy'))) || CoreConfigConstants.privacypolicy;
 
         this.navigator = window.navigator;
         if (window.location && window.location.href) {
@@ -97,7 +101,7 @@ export class CoreSettingsAboutPage {
         });
 
         this.networkStatus = appProvider.isOnline() ? 'core.online' : 'core.offline';
-        this.wifiConnection = appProvider.isNetworkAccessLimited() ? 'core.no' : 'core.yes';
+        this.wifiConnection = appProvider.isWifi() ? 'core.yes' : 'core.no';
         this.deviceWebWorkers = !!window['Worker'] && !!window['URL'] ? 'core.yes' : 'core.no';
         this.device = device;
 
@@ -109,5 +113,6 @@ export class CoreSettingsAboutPage {
         }
 
         this.localNotifAvailable = localNotificationsProvider.isAvailable() ? 'core.yes' : 'core.no';
+        this.pushId = pushNotificationsProvider.getPushId();
     }
 }

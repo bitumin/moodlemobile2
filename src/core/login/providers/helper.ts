@@ -14,7 +14,7 @@
 
 import { Injectable } from '@angular/core';
 import { Location } from '@angular/common';
-import { Platform, AlertController } from 'ionic-angular';
+import { Platform, AlertController, NavController, NavOptions } from 'ionic-angular';
 import { TranslateService } from '@ngx-translate/core';
 import { CoreAppProvider } from '@providers/app';
 import { CoreConfigProvider } from '@providers/config';
@@ -179,10 +179,10 @@ export class CoreLoginHelperProvider {
             } else {
                 this.goToSiteInitialPage();
             }
-        }).catch((errorMessage) => {
-            if (errorMessage) {
+        }).catch((error) => {
+            if (error) {
                 // An error occurred, display the error and logout the user.
-                this.domUtils.showErrorModal(errorMessage);
+                this.treatUserTokenError(siteData.siteUrl, error);
                 this.sitesProvider.logout();
             }
         }).finally(() => {
@@ -203,7 +203,8 @@ export class CoreLoginHelperProvider {
         return this.requestPasswordReset(siteUrl).then(() => {
             return true;
         }).catch((error) => {
-            return error.available == 1 || (error.errorcode != 'invalidrecord' && error.errorcode != '');
+            return error.available == 1 || (typeof error.errorcode != 'undefined' && error.errorcode != 'invalidrecord' &&
+                    error.errorcode != '');
         });
     }
 
@@ -335,15 +336,15 @@ export class CoreLoginHelperProvider {
      */
     getSitePolicy(siteId?: string): Promise<string> {
         return this.sitesProvider.getSite(siteId).then((site) => {
-            // Check if it's stored in the site config.
-            const sitePolicy = site.getStoredConfig('sitepolicy');
-            if (typeof sitePolicy != 'undefined') {
+            // Try to get the latest config, maybe the site policy was just added or has changed.
+            return site.getConfig('sitepolicy', true).then((sitePolicy) => {
                 return sitePolicy ? sitePolicy : Promise.reject(null);
-            }
-
-            // Not in the config, try to get it using auth_email_get_signup_settings.
-            return this.wsProvider.callAjax('auth_email_get_signup_settings', {}, { siteUrl: site.getURL() }).then((settings) => {
-                return settings.sitepolicy ? settings.sitepolicy : Promise.reject(null);
+            }, () => {
+                // Cannot get config, try to get the site policy using auth_email_get_signup_settings.
+                return this.wsProvider.callAjax('auth_email_get_signup_settings', {}, { siteUrl: site.getURL() })
+                        .then((settings) => {
+                    return settings.sitepolicy ? settings.sitepolicy : Promise.reject(null);
+                });
             });
         });
     }
@@ -415,14 +416,20 @@ export class CoreLoginHelperProvider {
     /**
      * Go to the initial page of a site depending on 'userhomepage' setting.
      *
+     * @param {NavController} [navCtrl] NavController to use. Defaults to app root NavController.
+     * @param {string} [page] Name of the page to load after loading the main page.
+     * @param {any} [params] Params to pass to the page.
+     * @param {NavOptions} [options] Navigation options.
      * @return {Promise<any>} Promise resolved when done.
      */
-    goToSiteInitialPage(): Promise<any> {
+    goToSiteInitialPage(navCtrl?: NavController, page?: string, params?: any, options?: NavOptions): Promise<any> {
+        navCtrl = navCtrl || this.appProvider.getRootNavController();
+
         // Due to DeepLinker, we need to remove the path from the URL before going to main menu.
         // IonTabs checks the URL to determine which path to load for deep linking, so we clear the URL.
         this.location.replaceState('');
 
-        return this.appProvider.getRootNavController().setRoot('CoreMainMenuPage');
+        return navCtrl.setRoot('CoreMainMenuPage', { redirectPage: page, redirectParams: params }, options);
     }
 
     /**
@@ -561,7 +568,7 @@ export class CoreLoginHelperProvider {
      */
     isSSOEmbeddedBrowser(code: number): boolean {
         if (this.appProvider.isLinux()) {
-            // In Linux desktop apps, always use embedded browser.
+            // In Linux desktop app, always use embedded browser.
             return true;
         }
 
@@ -586,18 +593,24 @@ export class CoreLoginHelperProvider {
      * @param {string} siteId Site to load.
      */
     protected loadSiteAndPage(page: string, params: any, siteId: string): void {
+        const navCtrl = this.appProvider.getRootNavController();
+
         if (siteId == CoreConstants.NO_SITE_ID) {
             // Page doesn't belong to a site, just load the page.
-            this.appProvider.getRootNavController().setRoot(page, params);
+            navCtrl.setRoot(page, params);
         } else {
             const modal = this.domUtils.showModalLoading();
-            this.sitesProvider.loadSite(siteId).then(() => {
-                if (!this.isSiteLoggedOut(page, params)) {
-                    this.loadPageInMainMenu(page, params);
+            this.sitesProvider.loadSite(siteId, page, params).then((loggedIn) => {
+                if (loggedIn) {
+                    // Due to DeepLinker, we need to remove the path from the URL before going to main menu.
+                    // IonTabs checks the URL to determine which path to load for deep linking, so we clear the URL.
+                    this.location.replaceState('');
+
+                    navCtrl.setRoot('CoreMainMenuPage', { redirectPage: page, redirectParams: params });
                 }
-            }).catch(() => {
+            }).catch((error) => {
                 // Site doesn't exist.
-                this.appProvider.getRootNavController().setRoot('CoreLoginSitesPage');
+                navCtrl.setRoot('CoreLoginSitesPage');
             }).finally(() => {
                 modal.dismiss();
             });
@@ -611,11 +624,7 @@ export class CoreLoginHelperProvider {
      * @param {any} params Params to pass to the page.
      */
     protected loadPageInMainMenu(page: string, params: any): void {
-        // Due to DeepLinker, we need to remove the path from the URL before going to main menu.
-        // IonTabs checks the URL to determine which path to load for deep linking, so we clear the URL.
-        this.location.replaceState('');
-
-        this.appProvider.getRootNavController().setRoot('CoreMainMenuPage', { redirectPage: page, redirectParams: params });
+        this.eventsProvider.trigger(CoreEventsProvider.LOAD_PAGE_MAIN_MENU, { redirectPage: page, redirectParams: params });
     }
 
     /**
@@ -645,7 +654,7 @@ export class CoreLoginHelperProvider {
         loginUrl += '&oauthsso=' + params.id;
 
         if (this.appProvider.isLinux()) {
-            // In Linux desktop apps, always use embedded browser.
+            // In Linux desktop app, always use embedded browser.
             this.utils.openInApp(loginUrl);
         } else {
             // Always open it in browser because the user might have the session stored in there.
@@ -694,7 +703,9 @@ export class CoreLoginHelperProvider {
      */
     openChangePassword(siteUrl: string, error: string): void {
         this.domUtils.showAlert(this.translate.instant('core.notice'), error, undefined, 3000).then((alert) => {
-            alert.onDidDismiss(() => {
+            const subscription = alert.didDismiss.subscribe(() => {
+                subscription && subscription.unsubscribe();
+
                 this.utils.openInApp(siteUrl + '/login/change_password.php');
             });
         });
@@ -932,6 +943,8 @@ export class CoreLoginHelperProvider {
     protected showLegacyNoticeModal(message: string): void {
         const isAndroid = this.platform.is('android'),
             isIOS = this.platform.is('ios'),
+            isWindows = this.appProvider.isWindows(),
+            isLinux = this.appProvider.isLinux(),
             buttons: any[] = [
                 {
                     text: this.translate.instant('core.ok'),
@@ -939,12 +952,22 @@ export class CoreLoginHelperProvider {
                 }
             ];
 
-        if (isAndroid || isIOS) {
+        if (isAndroid || isIOS || isWindows || isLinux) {
             buttons.push({
                 text: this.translate.instant('core.download'),
                 handler: (): void => {
-                    const link = isAndroid ? 'market://details?id=com.moodle.classic' :
-                            'itms-apps://itunes.apple.com/app/id1403448117';
+                    let link;
+
+                    if (isWindows) {
+                        link = 'https://download.moodle.org/desktop/download.php?platform=windows&version=342';
+                    } else if (isLinux) {
+                        link = 'https://download.moodle.org/desktop/download.php?platform=linux&version=342&arch=' +
+                                (this.appProvider.is64Bits() ? '64' : '32');
+                    } else if (isAndroid) {
+                        link = 'market://details?id=com.moodle.classic';
+                    } else {
+                        link = 'itms-apps://itunes.apple.com/app/id1403448117';
+                    }
 
                     this.utils.openInBrowser(link);
                 }
@@ -961,6 +984,66 @@ export class CoreLoginHelperProvider {
                 // Treat all anchors so they don't override the app.
                 const alertMessageEl: HTMLElement = alert.pageRef().nativeElement.querySelector('.alert-message');
                 this.domUtils.treatAnchors(alertMessageEl);
+            }
+        });
+    }
+
+    /**
+     * Show a modal to inform the user that a confirmation email was sent, and a button to resend the email on 3.6+ sites.
+     *
+     * @param {string} siteUrl Site URL.
+     * @param {string} [email] Email of the user. If set displayed in the message.
+     * @param {string} [username] Username. If not set the button to resend email will not be shown.
+     * @param {string} [password] User password. If not set the button to resend email will not be shown.
+     */
+    protected showNotConfirmedModal(siteUrl: string, email?: string, username?: string, password?: string): void {
+        const title = this.translate.instant('core.login.mustconfirm');
+        let message;
+        if (email) {
+            message = this.translate.instant('core.login.emailconfirmsent', { $a: email });
+        } else {
+            message = this.translate.instant('core.login.emailconfirmsentnoemail');
+        }
+
+        // Check whether we need to display the resend button or not.
+        let promise;
+        if (username && password) {
+            const modal = this.domUtils.showModalLoading();
+            // We don't have site info before login, the only way to check if the WS is available is by calling it.
+            const preSets = { siteUrl };
+            promise = this.wsProvider.callAjax('core_auth_resend_confirmation_email', {}, preSets).catch((error) => {
+                // If the WS responds with an invalid parameter error it means the WS is avaiable.
+                return Promise.resolve(error && error.errorcode === 'invalidparameter');
+            }).finally(() => {
+                modal.dismiss();
+            });
+        } else {
+            promise = Promise.resolve(false);
+        }
+
+        promise.then((canResend) => {
+            if (canResend) {
+                const okText = this.translate.instant('core.login.resendemail');
+                const cancelText = this.translate.instant('core.close');
+
+                this.domUtils.showConfirm(message, title, okText, cancelText).then(() => {
+                    // Call the WS to resend the confirmation email.
+                    const modal = this.domUtils.showModalLoading('core.sending', true);
+                    const data = { username, password };
+                    const preSets = { siteUrl };
+                    this.wsProvider.callAjax('core_auth_resend_confirmation_email', data, preSets).then((response) => {
+                        const message = this.translate.instant('core.login.emailconfirmsentsuccess');
+                        this.domUtils.showAlert(this.translate.instant('core.success'), message);
+                    }).catch((error) => {
+                        this.domUtils.showErrorModal(error);
+                    }).finally(() => {
+                        modal.dismiss();
+                    });
+                }).catch(() => {
+                    // Dialog dismissed.
+                });
+            } else {
+                this.domUtils.showAlert(title, message);
             }
         });
     }
@@ -998,12 +1081,16 @@ export class CoreLoginHelperProvider {
      *
      * @param {string} siteUrl Site URL to construct change password URL.
      * @param {any} error Error object containing errorcode and error message.
+     * @param {string} [username] Username.
+     * @param {string} [password] User password.
      */
-    treatUserTokenError(siteUrl: string, error: any): void {
+    treatUserTokenError(siteUrl: string, error: any, username?: string, password?: string): void {
         if (error.errorcode == 'forcepasswordchangenotice') {
-            this.openChangePassword(siteUrl, error.error || error.message || error.body || error.content);
+            this.openChangePassword(siteUrl, this.textUtils.getErrorMessageFromError(error));
+        } else if (error.errorcode == 'usernotconfirmed') {
+            this.showNotConfirmedModal(siteUrl, undefined, username, password);
         } else if (error.errorcode == 'legacymoodleversion') {
-            this.showLegacyNoticeModal(error.error);
+            this.showLegacyNoticeModal(this.textUtils.getErrorMessageFromError(error));
         } else {
             this.domUtils.showErrorModal(error);
         }

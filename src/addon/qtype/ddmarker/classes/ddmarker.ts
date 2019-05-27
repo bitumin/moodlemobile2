@@ -65,9 +65,11 @@ export class AddonQtypeDdMarkerQuestion {
      * @param {any} question The question instance.
      * @param {boolean} readOnly Whether it's read only.
      * @param {any[]} dropZones The drop zones received in the init object of the question.
+     * @param {string} [imgSrc] Background image source (3.6+ sites).
      */
     constructor(logger: CoreLoggerProvider, protected domUtils: CoreDomUtilsProvider, protected textUtils: CoreTextUtilsProvider,
-            protected container: HTMLElement, protected question: any, protected readOnly: boolean, protected dropZones: any[]) {
+            protected container: HTMLElement, protected question: any, protected readOnly: boolean, protected dropZones: any[],
+            protected imgSrc?: string) {
         this.logger = logger.getInstance('AddonQtypeDdMarkerQuestion');
 
         this.graphics = new AddonQtypeDdMarkerGraphicsApi(this, this.domUtils);
@@ -288,18 +290,13 @@ export class AddonQtypeDdMarkerQuestion {
      * @param {string} shape Name of the shape of the drop zone (circle, rectangle, polygon).
      * @param {string} coords Coordinates of the shape.
      * @param {string} colour Colour of the shape.
-     * @param {boolean} link Whether the marker should have a link in it.
      */
-    drawDropZone(dropZoneNo: number, markerText: string, shape: string, coords: string, colour: string, link: boolean): void {
+    drawDropZone(dropZoneNo: number, markerText: string, shape: string, coords: string, colour: string): void {
         let existingMarkerText: HTMLElement;
 
         const markerTexts = this.doc.markerTexts();
         // Check if there is already a marker text for this drop zone.
-        if (link) {
-            existingMarkerText = <HTMLElement> markerTexts.querySelector('span.markertext' + dropZoneNo + ' a');
-        } else {
-            existingMarkerText = <HTMLElement> markerTexts.querySelector('span.markertext' + dropZoneNo);
-        }
+        existingMarkerText = <HTMLElement> markerTexts.querySelector('span.markertext' + dropZoneNo);
 
         if (existingMarkerText) {
             // Marker text already exists. Update it or remove it if empty.
@@ -314,12 +311,7 @@ export class AddonQtypeDdMarkerQuestion {
                 span = document.createElement('span');
 
             span.className = classNames;
-
-            if (link) {
-                span.innerHTML = '<a href="#">' + markerText + '</a>';
-            } else {
-                span.innerHTML = markerText;
-            }
+            span.innerHTML = markerText;
 
             markerTexts.appendChild(span);
         }
@@ -713,19 +705,23 @@ export class AddonQtypeDdMarkerQuestion {
             return;
         }
 
-        const bgImg = this.doc.bgImg(),
-            imgLoaded = (): void => {
-                bgImg.removeEventListener('load', imgLoaded);
+        const bgImg = this.doc.bgImg();
+        if (!bgImg.src && this.imgSrc) {
+            bgImg.src = this.imgSrc;
+        }
 
-                this.makeImageDropable();
+        const imgLoaded = (): void => {
+            bgImg.removeEventListener('load', imgLoaded);
 
-                setTimeout(() => {
-                    this.redrawDragsAndDrops();
-                });
+            this.makeImageDropable();
 
-                this.afterImageLoadDone = true;
-                this.question.loaded = true;
-            };
+            setTimeout(() => {
+                this.redrawDragsAndDrops();
+            });
+
+            this.afterImageLoadDone = true;
+            this.question.loaded = true;
+        };
 
         bgImg.addEventListener('load', imgLoaded);
 
@@ -787,7 +783,7 @@ export class AddonQtypeDdMarkerQuestion {
         }
 
         // Re-draw drop zones.
-        if (this.dropZones.length !== 0) {
+        if (this.dropZones && this.dropZones.length !== 0) {
             this.graphics.clear();
             this.restartColours();
 
@@ -796,7 +792,7 @@ export class AddonQtypeDdMarkerQuestion {
                     dropZone = this.dropZones[dropZoneNo],
                     dzNo = Number(dropZoneNo);
 
-                this.drawDropZone(dzNo, dropZone.markertext, dropZone.shape, dropZone.coords, colourForDropZone, true);
+                this.drawDropZone(dzNo, dropZone.markertext, dropZone.shape, dropZone.coords, colourForDropZone);
             }
         }
     }

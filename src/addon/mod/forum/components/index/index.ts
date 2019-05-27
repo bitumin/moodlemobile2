@@ -19,6 +19,9 @@ import { CoreCourseModuleMainActivityComponent } from '@core/course/classes/main
 import { CoreCourseModulePrefetchDelegate } from '@core/course/providers/module-prefetch-delegate';
 import { CoreUserProvider } from '@core/user/providers/user';
 import { CoreGroupsProvider } from '@providers/groups';
+import { CoreRatingProvider } from '@core/rating/providers/rating';
+import { CoreRatingOfflineProvider } from '@core/rating/providers/offline';
+import { CoreRatingSyncProvider } from '@core/rating/providers/sync';
 import { AddonModForumProvider } from '../../providers/forum';
 import { AddonModForumHelperProvider } from '../../providers/helper';
 import { AddonModForumOfflineProvider } from '../../providers/offline';
@@ -41,6 +44,7 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
     descriptionNote: string;
     forum: any;
     canLoadMore = false;
+    loadMoreError = false;
     discussions = [];
     offlineDiscussions = [];
     selectedDiscussion = 0; // Disucssion ID or negative timecreated if it's an offline discussion.
@@ -55,6 +59,10 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
     protected newDiscObserver: any;
     protected viewDiscObserver: any;
 
+    hasOfflineRatings: boolean;
+    protected ratingOfflineObserver: any;
+    protected ratingSyncObserver: any;
+
     constructor(injector: Injector,
             @Optional() protected content: Content,
             protected navCtrl: NavController,
@@ -65,7 +73,8 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
             protected forumOffline: AddonModForumOfflineProvider,
             protected forumSync: AddonModForumSyncProvider,
             protected prefetchDelegate: CoreCourseModulePrefetchDelegate,
-            protected prefetchHandler: AddonModForumPrefetchHandler) {
+            protected prefetchHandler: AddonModForumPrefetchHandler,
+            protected ratingOffline: CoreRatingOfflineProvider) {
         super(injector);
     }
 
@@ -81,8 +90,10 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
         }, this.siteId);
 
         // Listen for discussions added. When a discussion is added, we reload the data.
-        this.newDiscObserver = this.eventsProvider.on(AddonModForumProvider.NEW_DISCUSSION_EVENT, this.eventReceived.bind(this));
-        this.replyObserver = this.eventsProvider.on(AddonModForumProvider.REPLY_DISCUSSION_EVENT, this.eventReceived.bind(this));
+        this.newDiscObserver = this.eventsProvider.on(AddonModForumProvider.NEW_DISCUSSION_EVENT,
+                this.eventReceived.bind(this, true));
+        this.replyObserver = this.eventsProvider.on(AddonModForumProvider.REPLY_DISCUSSION_EVENT,
+                this.eventReceived.bind(this, false));
 
         // Select the current opened discussion.
         this.viewDiscObserver = this.eventsProvider.on(AddonModForumProvider.VIEW_DISCUSSION_EVENT, (data) => {
@@ -96,6 +107,22 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
                 }
             }
         }, this.sitesProvider.getCurrentSiteId());
+
+        // Listen for offline ratings saved and synced.
+        this.ratingOfflineObserver = this.eventsProvider.on(CoreRatingProvider.RATING_SAVED_EVENT, (data) => {
+            if (this.forum && data.component == 'mod_forum' && data.ratingArea == 'post' &&
+                    data.contextLevel == 'module' && data.instanceId == this.forum.cmid) {
+                this.hasOfflineRatings = true;
+            }
+        });
+        this.ratingSyncObserver = this.eventsProvider.on(CoreRatingSyncProvider.SYNCED_EVENT, (data) => {
+            if (this.forum && data.component == 'mod_forum' && data.ratingArea == 'post' &&
+                    data.contextLevel == 'module' && data.instanceId == this.forum.cmid) {
+               this.ratingOffline.hasRatings('mod_forum', 'post', 'module', this.forum.cmid).then((hasRatings) => {
+                   this.hasOfflineRatings = hasRatings;
+               });
+            }
+        });
 
         this.loadContent(false, true).then(() => {
             if (!this.forum) {
@@ -112,7 +139,7 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
             }
 
             this.forumProvider.logView(this.forum.id).then(() => {
-                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completionstatus);
+                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completiondata);
             }).catch((error) => {
                 // Ignore errors.
             });
@@ -128,6 +155,8 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
      * @return {Promise<any>} Promise resolved when done.
      */
     protected fetchContent(refresh: boolean = false, sync: boolean = false, showErrors: boolean = false): Promise<any> {
+        this.loadMoreError = false;
+
         return this.forumProvider.getForum(this.courseId, this.module.id).then((forum) => {
             this.forum = forum;
 
@@ -173,6 +202,9 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
             return Promise.all([
                 this.fetchOfflineDiscussion(),
                 this.fetchDiscussions(refresh),
+                this.ratingOffline.hasRatings('mod_forum', 'post', 'module', this.forum.cmid).then((hasRatings) => {
+                    this.hasOfflineRatings = hasRatings;
+                })
             ]);
         }).catch((message) => {
             if (!refresh) {
@@ -182,7 +214,7 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
 
             this.domUtils.showErrorModalDefault(message, 'addon.mod_forum.errorgetforum', true);
 
-            this.canLoadMore = false; // Set to false to prevent infinite calls with infinite-loading.
+            this.loadMoreError = true; // Set to prevent infinite calls with infinite-loading.
         });
     }
 
@@ -239,6 +271,8 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
      * @return {Promise<any>} Promise resolved when done.
      */
     protected fetchDiscussions(refresh: boolean): Promise<any> {
+        this.loadMoreError = false;
+
         if (refresh) {
             this.page = 0;
         }
@@ -305,13 +339,16 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
     /**
      * Convenience function to load more forum discussions.
      *
+     * @param {any} [infiniteComplete] Infinite scroll complete function. Only used from core-infinite-loading.
      * @return {Promise<any>} Promise resolved when done.
      */
-    protected fetchMoreDiscussions(): Promise<any> {
+    fetchMoreDiscussions(infiniteComplete?: any): Promise<any> {
         return this.fetchDiscussions(false).catch((message) => {
             this.domUtils.showErrorModalDefault(message, 'addon.mod_forum.errorgetforum', true);
 
-            this.canLoadMore = false; // Set to false to prevent infinite calls with infinite-loading.
+            this.loadMoreError = true; // Set to prevent infinite calls with infinite-loading.
+        }).finally(() => {
+            infiniteComplete && infiniteComplete();
         });
     }
 
@@ -341,21 +378,9 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
     protected sync(): Promise<boolean> {
         const promises = [];
 
-        promises.push(this.forumSync.syncForumDiscussions(this.forum.id).then((result) => {
-            if (result.warnings && result.warnings.length) {
-                this.domUtils.showErrorModal(result.warnings[0]);
-            }
-
-            return result;
-        }));
-
-        promises.push(this.forumSync.syncForumReplies(this.forum.id).then((result) => {
-            if (result.warnings && result.warnings.length) {
-                this.domUtils.showErrorModal(result.warnings[0]);
-            }
-
-            return result;
-        }));
+        promises.push(this.forumSync.syncForumDiscussions(this.forum.id));
+        promises.push(this.forumSync.syncForumReplies(this.forum.id));
+        promises.push(this.forumSync.syncRatings(this.forum.cmid));
 
         return Promise.all(promises).then((results) => {
             return results.reduce((a, b) => ({
@@ -389,14 +414,36 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
     /**
      * Function called when we receive an event of new discussion or reply to discussion.
      *
+     * @param {boolean} isNewDiscussion Whether it's a new discussion event.
      * @param {any} data Event data.
      */
-    protected eventReceived(data: any): void {
+    protected eventReceived(isNewDiscussion: boolean, data: any): void {
         if ((this.forum && this.forum.id === data.forumId) || data.cmId === this.module.id) {
-            this.showLoadingAndRefresh(false);
+            if (isNewDiscussion && this.splitviewCtrl.isOn()) {
+                // Discussion added, clear details page.
+                this.splitviewCtrl.emptyDetails();
+            }
+
+            this.showLoadingAndRefresh(false).finally(() => {
+                // If it's a new discussion in tablet mode, try to open it.
+                if (isNewDiscussion && this.splitviewCtrl.isOn()) {
+
+                    if (data.discussionId) {
+                        // Discussion sent to server, search it in the list of discussions.
+                        const discussion = this.discussions.find((disc) => { return disc.discussion == data.discussionId; });
+                        if (discussion) {
+                            this.openDiscussion(discussion);
+                        }
+
+                    } else if (data.discTimecreated) {
+                        // It's an offline discussion, open it.
+                        this.openNewDiscussion(data.discTimecreated);
+                    }
+                }
+            });
 
             // Check completion since it could be configured to complete once the user adds a new discussion or replies.
-            this.courseProvider.checkModuleCompletion(this.courseId, this.module.completionstatus);
+            this.courseProvider.checkModuleCompletion(this.courseId, this.module.completiondata);
         }
     }
 
@@ -430,6 +477,8 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
             timeCreated: timeCreated,
         };
         this.splitviewCtrl.push('AddonModForumNewDiscussionPage', params);
+
+        this.selectedDiscussion = 0;
     }
 
     /**
@@ -442,5 +491,7 @@ export class AddonModForumIndexComponent extends CoreCourseModuleMainActivityCom
         this.newDiscObserver && this.newDiscObserver.off();
         this.replyObserver && this.replyObserver.off();
         this.viewDiscObserver && this.viewDiscObserver.off();
+        this.ratingOfflineObserver && this.ratingOfflineObserver.off();
+        this.ratingSyncObserver && this.ratingSyncObserver.off();
     }
 }

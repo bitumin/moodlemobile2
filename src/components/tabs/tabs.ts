@@ -16,9 +16,12 @@ import {
     Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, AfterViewInit, ViewChild, ElementRef,
     SimpleChange
 } from '@angular/core';
-import { CoreTabComponent } from './tab';
-import { Content, Slides } from 'ionic-angular';
+import { Content, Slides, Platform } from 'ionic-angular';
+import { TranslateService } from '@ngx-translate/core';
+import { Subscription } from 'rxjs';
 import { CoreDomUtilsProvider } from '@providers/utils/dom';
+import { CoreAppProvider } from '@providers/app';
+import { CoreTabComponent } from './tab';
 
 /**
  * This component displays some tabs that usually share data between them.
@@ -58,6 +61,8 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     maxSlides = 3;
     slidesShown = this.maxSlides;
     numTabsShown = 0;
+    direction = 'ltr';
+    description = '';
 
     protected originalTabsContainer: HTMLElement; // The container of the original tabs. It will include each tab's content.
     protected initialized = false;
@@ -72,9 +77,24 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     protected isCurrentView = true;
     protected shouldSlideToInitial = false; // Whether we need to slide to the initial slide because it's out of view.
     protected hasSliddenToInitial = false; // Whether we've already slidden to the initial slide or there was no need.
+    protected selectHistory = [];
 
-    constructor(element: ElementRef, protected content: Content, protected domUtils: CoreDomUtilsProvider) {
+    protected firstSelectedTab: number;
+    protected unregisterBackButtonAction: any;
+    protected languageChangedSubscription: Subscription;
+
+    constructor(element: ElementRef, protected content: Content, protected domUtils: CoreDomUtilsProvider,
+            protected appProvider: CoreAppProvider, platform: Platform, translate: TranslateService) {
         this.tabBarElement = element.nativeElement;
+
+        this.direction = platform.isRTL ? 'rtl' : 'ltr';
+
+        // Change the side when the language changes.
+        this.languageChangedSubscription = translate.onLangChange.subscribe((event: any) => {
+            setTimeout(() => {
+                this.direction = platform.isRTL ? 'rtl' : 'ltr';
+            });
+        });
     }
 
     /**
@@ -125,15 +145,48 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     ionViewDidEnter(): void {
         this.isCurrentView = true;
 
-        if (this.initialized) {
-            this.calculateSlides();
-        }
+        this.calculateSlides();
+
+        this.registerBackButtonAction();
+    }
+
+    /**
+     * Register back button action.
+     */
+    protected registerBackButtonAction(): void {
+        this.unregisterBackButtonAction = this.appProvider.registerBackButtonAction(() => {
+            // The previous page in history is not the last one, we need the previous one.
+            if (this.selectHistory.length > 1) {
+                const tab = this.selectHistory[this.selectHistory.length - 2];
+
+                // Remove curent and previous tabs from history.
+                this.selectHistory = this.selectHistory.filter((tabId) => {
+                    return this.selected != tabId && tab != tabId;
+                });
+
+                this.selectTab(tab);
+
+                return true;
+            } else if (this.selected != this.firstSelectedTab) {
+                // All history is gone but we are not in the first selected tab.
+                this.selectHistory = [];
+
+                this.selectTab(this.firstSelectedTab);
+
+                return true;
+            }
+
+            return false;
+        }, 750);
     }
 
     /**
      * User left the page that contains the component.
      */
     ionViewDidLeave(): void {
+        // Unregister the custom back button action for this page
+        this.unregisterBackButtonAction && this.unregisterBackButtonAction();
+
         this.isCurrentView = false;
     }
 
@@ -147,6 +200,7 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         if (this.getIndex(tab) == -1) {
             this.tabs.push(tab);
             this.sortTabs();
+
             this.calculateSlides();
 
             if (this.initialized && this.tabs.length > 1 && this.tabBarHeight == 0) {
@@ -163,7 +217,7 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
      * Calculate slides.
      */
     calculateSlides(): void {
-        if (!this.isCurrentView || !this.tabsShown) {
+        if (!this.isCurrentView || !this.tabsShown || !this.initialized) {
             // Don't calculate if component isn't in current view, the calculations are wrong.
             return;
         }
@@ -185,8 +239,8 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
     /**
      * Get the index of tab.
      *
-     * @param  {any}    tab [description]
-     * @return {number}     [description]
+     * @param  {any}    tab Tab object to check.
+     * @return {number}     Index number on the tabs array or -1 if not found.
      */
     getIndex(tab: any): number {
         for (let i = 0; i < this.tabs.length; i++) {
@@ -229,6 +283,7 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         }
 
         if (selectedTab) {
+            this.firstSelectedTab = selectedIndex;
             this.selectTab(selectedIndex);
         }
 
@@ -246,10 +301,10 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
             }
         }
 
+        this.initialized = true;
+
         // Check which arrows should be shown.
         this.calculateSlides();
-
-        this.initialized = true;
     }
 
     /**
@@ -272,6 +327,8 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
             // Current tab has changed, don't slide to initial anymore.
             this.shouldSlideToInitial = false;
         }
+
+        this.updateAriaHidden(); // Sliding resets the aria-hidden, update it.
     }
 
     /**
@@ -287,6 +344,7 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
         this.slideChanged();
 
         setTimeout(() => {
+            this.calculateTabBarHeight();
             this.slides.update();
             this.slides.resize();
 
@@ -298,11 +356,18 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
                     if (this.shouldSlideToInitial) {
                         this.slides.slideTo(this.selected, 0);
                         this.shouldSlideToInitial = false;
+                        this.updateAriaHidden(); // Slide's slideTo() sets aria-hidden to true, update it.
                     }
                 }, 400);
+
+                return;
             } else if (this.selected) {
                 this.hasSliddenToInitial = true;
             }
+
+            setTimeout(() => {
+                this.updateAriaHidden(); // Slide's update() sets aria-hidden to true, update it.
+            }, 400);
         });
     }
 
@@ -402,8 +467,10 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
 
         if (this.selected) {
             this.slides.slideTo(index);
+            this.updateAriaHidden(); // Slide's slideTo() sets aria-hidden to true, update it.
         }
 
+        this.selectHistory.push(index);
         this.selected = index;
         newTab.selectTab();
         this.ionChange.emit(newTab);
@@ -432,6 +499,15 @@ export class CoreTabsComponent implements OnInit, AfterViewInit, OnChanges, OnDe
      */
     tabVisibilityChanged(): void {
         this.calculateSlides();
+    }
+
+    /**
+     * Update aria-hidden of all tabs.
+     */
+    protected updateAriaHidden(): void {
+        this.tabs.forEach((tab, index) => {
+            tab.updateAriaHidden();
+        });
     }
 
     /**

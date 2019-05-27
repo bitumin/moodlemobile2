@@ -54,7 +54,9 @@ export class AddonModSurveyIndexComponent extends CoreCourseModuleMainActivityCo
 
         this.loadContent(false, true).then(() => {
             this.surveyProvider.logView(this.survey.id).then(() => {
-                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completionstatus);
+                this.courseProvider.checkModuleCompletion(this.courseId, this.module.completiondata);
+            }).catch(() => {
+                // Ignore errors.
             });
         });
     }
@@ -93,7 +95,7 @@ export class AddonModSurveyIndexComponent extends CoreCourseModuleMainActivityCo
      * Download survey contents.
      *
      * @param  {boolean}      [refresh=false]    If it's refreshing content.
-     * @param  {boolean}      [sync=false]       If the refresh is needs syncing.
+     * @param  {boolean}      [sync=false]       If it should try to sync.
      * @param  {boolean}      [showErrors=false] If show errors to the user of hide them.
      * @return {Promise<any>} Promise resolved when done.
      */
@@ -186,8 +188,20 @@ export class AddonModSurveyIndexComponent extends CoreCourseModuleMainActivityCo
                 });
             }
 
-            return this.surveyProvider.submitAnswers(this.survey.id, this.survey.name, this.courseId, answers).then(() => {
-                return this.showLoadingAndRefresh(false);
+            return this.surveyProvider.submitAnswers(this.survey.id, this.survey.name, this.courseId, answers).then((online) => {
+                if (online && this.isPrefetched()) {
+                    // The survey is downloaded, update the data.
+                    return this.surveySync.prefetchAfterUpdate(this.module, this.courseId).then(() => {
+                        // Update the view.
+                        this.showLoadingAndFetch(false, false);
+                    }).catch((error) => {
+                        // Prefetch failed, refresh the data.
+                        return this.showLoadingAndRefresh(false);
+                    });
+                } else {
+                    // Not downloaded, refresh the data.
+                    return this.showLoadingAndRefresh(false);
+                }
             }).finally(() => {
                 modal.dismiss();
             });
