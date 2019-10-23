@@ -219,4 +219,20 @@ export class CoreMainMenuPage implements OnDestroy {
         window.removeEventListener('resize', this.initHandlers.bind(this));
         this.appProvider.setMainMenuOpen(this.mainMenuId, false);
     }
+
+    goToHome(): Promise<any> {
+        return this.mainTabs.select(1);
+    }
+
+    goToUserSettings(): Promise<any> {
+        return this.mainTabs.select(this.mainTabs.length() - 1);
+    }
+
+    goToChat() {
+        return this.mainTabs.select(3);
+    }
+
+    goToNotifications() {
+        return this.mainTabs.select(4);
+    }
 }

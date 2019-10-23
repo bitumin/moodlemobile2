@@ -63,6 +63,8 @@ export class MoodleMobileApp implements OnInit {
                 } else if (this.appProvider.isWindows()) {
                     app.setElementClass('platform-windows', true);
                 }
+            } else if (this.appProvider.isBrowser()) {
+                app.setElementClass('platform-browser', true);
             }
         });
 

@@ -97,7 +97,7 @@ export class CoreDashboardMainMenuHandler implements CoreMainMenuHandler {
     getDisplayData(): CoreMainMenuHandlerData {
         return {
             icon: 'home',
-            title: 'core.courses.mymoodle',
+            title: 'addon.local_mylang.home',
             page: 'CoreCoursesDashboardPage',
             class: 'core-dashboard-handler'
         };

@@ -162,6 +162,8 @@
     "addon.files.files": "Files",
     "addon.files.privatefiles": "Private files",
     "addon.files.sitefiles": "Site files",
+    "addon.local_mylang.home": "Home",
+    "addon.local_mylang.mysettings": "My settings",
     "addon.messageoutput_airnotifier.processorsettingsdesc": "Configure devices",
     "addon.messages.acceptandaddcontact": "Accept and add to contacts",
     "addon.messages.addcontact": "Add contact",

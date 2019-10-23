@@ -676,7 +676,7 @@ ion-app.app-root {
         > ion-icon {
           color: $color-base;
           position: absolute;
-          @include position(0, null, null, 16px)
+          @include position(0, null, null, 16px);
           height: 100%;
           font-size: 24px;
           display: flex;
@@ -1092,6 +1092,134 @@ ion-app.platform-desktop {
   &.platform-windows {
     video::-webkit-media-text-track-display {
       font-size: 0.6em;
+    }
+  }
+}
+
+// Browser styles.
+
+
+$core-sidetab-size-browser: 285px;
+
+.platform-browser-toolbar {
+  display: none;
+}
+@media (min-width: 576px) {
+  ion-app.app-root.app-root-md.platform-browser {
+    // Side bar.
+    core-ion-tabs.tabs[tabsplacement="side"] {
+      // Hide the icons from the side bar that we are going to show instead in the browser-specific top toolbar.
+      #tab-t0-1,
+      #tab-t0-4,
+      #tab-t0-5 {
+        display: none;
+      }
+
+      // Make the side bar look more like a typical web site navbar.
+      .tabbar {
+        @include float(start);
+        width: $core-sidetab-size-browser;
+        height: calc(100% - 56px);
+        flex-direction: column;
+
+        .tab-button {
+          text-align: left;
+          -webkit-box-orient: horizontal;
+          -webkit-flex-direction: row;
+          -ms-flex-direction: row;
+          flex-direction: row;
+          flex: 0;
+          justify-content: left;
+          transition: none;
+          transform: none;
+
+          .tab-button-icon {
+            transition: none;
+            transform: none;
+          }
+
+          .tab-button-text {
+            display: block;
+            font-size: 1.4rem;
+            margin-left: 15px;
+            transition: none;
+            transform: none;
+          }
+
+          .tab-badge.badge {
+            @include position(calc(50% - 30px), 2px, null, null);
+          }
+        }
+      }
+
+      .tabcontent {
+        width: calc(100% - #{($core-sidetab-size-browser)});
+        position: absolute;
+        @include position(56px, 0, 0, 0);
+
+        core-ion-tab {
+          @include position(0, 0, 0, $core-sidetab-size-browser);
+          position: relative;
+
+          // Redo content toolbar styles so it looks more like a page header (not a toolbar),
+          // since we have added already a browser-specific toolbar.
+          .toolbar.toolbar-md {
+            .toolbar-background-md {
+              background: transparent;
+            }
+            .bar-button.bar-button-md {
+              color: #3a3a3a;
+            }
+            .bar-buttons.bar-buttons-md {
+              color: #3a3a3a;
+            }
+            .button.button-md {
+              color: #3a3a3a;
+            }
+            .toolbar-content.toolbar-content-md {
+              .title.title-md {
+                .toolbar-title.toolbar-title-md {
+                  color: #3a3a3a;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Browser-specific navbar.
+    .platform-browser-toolbar {
+      display: block;
+
+      .toolbar-content {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        align-items: center;
+        padding-right: 15px;
+
+        .toolbar-title {
+          cursor: pointer;
+        }
+
+        .toolbar-icons-container {
+          margin-left: auto;
+          display: flex;
+          flex-direction: row;
+          flex-wrap: nowrap;
+          justify-content: flex-start;
+          align-items: center;
+
+          .toolbar-icon {
+            font-size: 30px;
+            color: white;
+            cursor: pointer;
+            margin-left: 25px;
+          }
+        }
+      }
     }
   }
 }
