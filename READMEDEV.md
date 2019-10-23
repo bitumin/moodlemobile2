@@ -153,3 +153,23 @@ ionic.config.json
 package.json
 config.xml
 ```
+
+### Moodle Web App
+
+1. Build the development version of the project into www/
+
+```
+$ ionic serve browser
+```
+
+2. Copy or move the www/ within your Moodle backend directories (the usual php Moodle),
+or serve the folder using the same local domain than the Moodle backend (to avoid CORS errors).
+
+3. Copy the manifest.json and the icons pack within webresources to the root of the web app folder
+(we may automate this steps in future).
+
+To build the production version do the same but use this build command instead:
+
+```
+$ ionic build browser
+```
