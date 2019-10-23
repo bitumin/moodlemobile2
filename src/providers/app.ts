@@ -160,7 +160,7 @@ export class CoreAppProvider {
     }
 
     /**
-     * Checks if the app is running in a 64 bits desktop environment (not browser).
+     * Checks if the app is running in a 64 bits desktop environment (electron desktop app on a 64 bits machine).
      *
      * @return {boolean} Whether the app is running in a 64 bits desktop environment (not browser).
      */
@@ -171,7 +171,7 @@ export class CoreAppProvider {
     }
 
     /**
-     * Checks if the app is running in a desktop environment (not browser).
+     * Checks if the app is running in a desktop environment (electron desktop app).
      *
      * @return {boolean} Whether the app is running in a desktop environment (not browser).
      */
@@ -179,6 +179,15 @@ export class CoreAppProvider {
         const process = (<any> window).process;
 
         return !!(process && process.versions && typeof process.versions.electron != 'undefined');
+    }
+
+    /**
+     * Checks if the app is running in a browser (both mobile or desktop browser).
+     *
+     * @return {boolean}
+     */
+    isBrowser(): boolean {
+        return document.URL.indexOf( 'http://' ) !== -1 || document.URL.indexOf( 'https://' ) !== -1;
     }
 
     /**
