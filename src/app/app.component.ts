@@ -64,8 +64,64 @@ export class MoodleMobileApp implements OnInit {
                     app.setElementClass('platform-windows', true);
                 }
             } else if (this.appProvider.isBrowser()) {
-                app.setElementClass('platform-browser', true);
-            }
+                // -----------------------------------------------------------------------------//
+                // MoodleWebApp: Custom vars
+
+                // General variables to identify each browser property
+                const
+                    ua         = navigator.userAgent.toLowerCase(),
+                    safari      = ua.indexOf('safari') > -1,
+                    chrome      = ua.indexOf('chrome') > -1,
+                    edge        = ua.indexOf('edge') > -1,
+                    explorer    = ua.indexOf('trident') > -1,
+                    firefox     = ua.indexOf('firefox') > -1,
+                    opera       = ua.indexOf('opr') > -1,
+                    vivaldi     = ua.indexOf('vivaldi') > -1,
+
+                    // Specify what properties each browser has
+                    isChrome    = chrome && safari && !edge && !opera && !vivaldi,
+                    isSafari    = safari && !chrome && !edge && !opera && !vivaldi,
+                    isEdge      = edge && chrome && safari,
+                    isExplorer  = explorer,
+                    isFirefox   = firefox,
+                    isOpera     = opera && chrome && safari,
+                    isVivaldi   = vivaldi && chrome && safari,
+
+                    // Group all browsers
+                    browsers = [isChrome, isSafari, isEdge, isExplorer, isFirefox, isOpera, isVivaldi];
+                /*
+                 *  IsChrome tested up to version 77.0.3865.120
+                 *  IsFirefox tested up to version 70.0
+                 *  IsEdge tested up to version 44.18362.387
+                 *  IsOpera tested up to version 60.0.3255
+                 *  IsVivaldi tested up to version 2.8.1664.35
+                 */
+                    if ( browsers ) {
+                        // Alert('BROWSERR!!!');
+                        app.setElementClass('platform-browser', true);
+                        if (isChrome) {
+                            alert('Chrome!');
+                            app.setElementClass('platform-browser-chrome', true);
+                        }
+                        if (isFirefox) {
+                            // Alert('Firefox!');
+                            app.setElementClass('platform-browser-firefox', true);
+                        }
+                        if (isEdge) {
+                            // Aalert('Edge!');
+                            app.setElementClass('platform-browser-edge', true);
+                        }
+                        if (isOpera) {
+                            // Alert('Opera!');
+                            app.setElementClass('platform-browser-opera', true);
+                        }
+                        if (isVivaldi) {
+                            // Alert('Vivaldi!');
+                            app.setElementClass('platform-browser-vivaldi', true);
+                        }
+                    }
+                // App.setElementClass('platform-browser', true);
+            } // Else if (this.appProvider.isBrowser())
         });
 
     }
